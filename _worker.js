@@ -120,7 +120,7 @@ async function 整理成数组(内容) {
 }
 
 // 请求优选API
-async function 请求优选API(urls, 默认端口 = '443', 超时时间 = 3000) {
+async function 请求优选API(urls, 默认端口 = '2053', 超时时间 = 3000) {
     if (!urls?.length) return [];
     const results = new Set();
     await Promise.allSettled(urls.map(async (url) => {
@@ -255,7 +255,7 @@ async function fetchAndParseNewIPs(piu) {
 function generateLinksFromSource(list, user, workerDomain, disableNonTLS = false, customPath = '/') {
     const CF_HTTP_PORTS = [80, 8080, 8880, 2052, 2082, 2086, 2095];
     const CF_HTTPS_PORTS = [443, 2053, 2083, 2087, 2096, 8443];
-    const defaultHttpsPorts = [443];
+    const defaultHttpsPorts = [2053];
     const defaultHttpPorts = disableNonTLS ? [] : [80];
     const links = [];
     const wsPath = customPath || '/';
@@ -1554,7 +1554,7 @@ export default {
             }
             
             const apiUrl = url.searchParams.get('url');
-            const port = url.searchParams.get('port') || '443';
+            const port = url.searchParams.get('port') || '2053';
             const timeout = parseInt(url.searchParams.get('timeout') || '3000');
             
             if (!apiUrl) {
