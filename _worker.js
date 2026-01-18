@@ -215,33 +215,6 @@ async function 请求优选API(urls, 默认端口 = '2053', 超时时间 = 3000)
                         const wrappedIP = IPV6_PATTERN.test(cols[ipIdx]) ? `[${cols[ipIdx]}]` : cols[ipIdx];
                         results.add(`${wrappedIP}:${port}#CF优选 ${cols[delayIdx]}ms ${cols[speedIdx]}MB/s`);
                     });
-                } else {
-                    // 兼容无表头 CSV：IP,PORT,国家,备注...（也支持更多列，都会合并为备注）
-                    const portFallback = new URL(url).searchParams.get('port') || 默认端口;
-                    const allLines = lines; // 第1行也是数据
-                    allLines.forEach(line => {
-                        const cols = line.split(',').map(c => c.trim()).filter(c => c !== '');
-                        if (cols.length < 1) return;
-
-                        const ipRaw = cols[0];
-                        const portRaw = cols.length >= 2 ? cols[1] : '';
-                        const portNum = parseInt(portRaw, 10);
-                        const port = (Number.isFinite(portNum) && portNum > 0 && portNum < 65536) ? portNum : parseInt(portFallback, 10);
-                        if (!port || !Number.isFinite(port)) return;
-
-                        // 备注：优先用 国家 + 后续字段
-                        let remark = '';
-                        if (cols.length >= 4) {
-                            remark = `${cols[2]}-${cols.slice(3).join(' ')}`;
-                        } else if (cols.length === 3) {
-                            remark = cols[2];
-                        } else {
-                            remark = ipRaw;
-                        }
-
-                        const wrappedIP = IPV6_PATTERN.test(ipRaw) ? `[${ipRaw}]` : ipRaw;
-                        results.add(`${wrappedIP}:${port}#${remark}`);
-                    });
                 }
             }
         } catch (e) { }
@@ -309,9 +282,7 @@ function generateLinksFromSource(list, user, workerDomain, disableNonTLS = false
         } else {
             const useCustom = Array.isArray(customPorts) && customPorts.length > 0;
             if (useCustom) {
-                customPorts.forEach(p => {
-                    const port = parseInt(p, 10);
-                    if (!Number.isFinite(port) || port <= 0 || port >= 65536) return;
+                customPorts.forEach(port => {
                     const isHttp = CF_HTTP_PORTS.includes(port);
                     const isHttps = CF_HTTPS_PORTS.includes(port);
                     if (disableNonTLS && isHttp) return;
@@ -391,13 +362,10 @@ async function generateTrojanLinksFromSource(list, user, workerDomain, disableNo
         } else {
             const useCustom = Array.isArray(customPorts) && customPorts.length > 0;
             if (useCustom) {
-                customPorts.forEach(p => {
-                    const port = parseInt(p, 10);
-                    if (!Number.isFinite(port) || port <= 0 || port >= 65536) return;
+                customPorts.forEach(port => {
                     const isHttp = CF_HTTP_PORTS.includes(port);
                     const isHttps = CF_HTTPS_PORTS.includes(port);
                     if (disableNonTLS && isHttp) return;
-                    // Trojan 默认以 TLS 为主；若用户显式给了 HTTP 端口且未开启 TLS-only，则允许生成 nonTLS
                     if (isHttps) portsToGenerate.push({ port, tls: true });
                     else if (isHttp) portsToGenerate.push({ port, tls: false });
                     else portsToGenerate.push({ port, tls: true });
@@ -471,9 +439,7 @@ function generateVMessLinksFromSource(list, user, workerDomain, disableNonTLS = 
         } else {
             const useCustom = Array.isArray(customPorts) && customPorts.length > 0;
             if (useCustom) {
-                customPorts.forEach(p => {
-                    const port = parseInt(p, 10);
-                    if (!Number.isFinite(port) || port <= 0 || port >= 65536) return;
+                customPorts.forEach(port => {
                     const isHttp = CF_HTTP_PORTS.includes(port);
                     const isHttps = CF_HTTPS_PORTS.includes(port);
                     if (disableNonTLS && isHttp) return;
@@ -1279,7 +1245,7 @@ function generateHomePage(scuValue) {
 
             <div class="form-group">
                 <label>自定义端口（可选）</label>
-                <input type="text" id="customPorts" placeholder="例如：443,2053,2096,8443">
+                <input type="text" id="customPorts" placeholder="例如：2053 或 443,2053,2096">
                 <small style="display:block;margin-top:6px;color:#86868b;font-size:13px;">支持英文逗号分隔；留空则使用默认端口策略</small>
             </div>
             
@@ -1522,15 +1488,7 @@ function generateHomePage(scuValue) {
 
             // 添加自定义端口
             if (customPortsRaw) {
-                const ports = customPortsRaw
-                    .split(',')
-                    .map(s => s.trim())
-                    .filter(Boolean)
-                    .map(s => parseInt(s, 10))
-                    .filter(n => Number.isFinite(n) && n > 0 && n < 65536);
-                if (ports.length > 0) {
-                    subscriptionUrl += \`&ports=\${encodeURIComponent(ports.join(','))}\`;
-                }
+                subscriptionUrl += \`&ports=\${encodeURIComponent(customPortsRaw)}\`;
             }
             
             let finalUrl = subscriptionUrl;
@@ -1727,7 +1685,7 @@ export default {
             const portsParam = url.searchParams.get('ports') || '';
             const customPorts = portsParam
                 .split(',')
-                .map(s => parseInt(s.trim(), 10))
+                .map(s => parseInt((s || '').trim(), 10))
                 .filter(n => Number.isFinite(n) && n > 0 && n < 65536);
             
             return await handleSubscriptionRequest(request, uuid, domain, piu, ipv4Enabled, ipv6Enabled, ispMobile, ispUnicom, ispTelecom, evEnabled, etEnabled, vmEnabled, disableNonTLS, customPath, customPorts);
