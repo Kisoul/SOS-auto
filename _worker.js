@@ -222,7 +222,45 @@ async function 请求优选API(urls, 默认端口 = '2053', 超时时间 = 3000)
     return Array.from(results);
 }
 
-// 从GitHub获取优选IP（保留原有功能，同时支持优选API）
+// 解析单行优选记录：同时支持
+// 1) IP:PORT#备注
+// 2) IP:PORT（无备注）
+// 3) IP,PORT,国家,备注...（CSV，无表头，后续列会合并为备注）
+function parsePreferredLine(line) {
+    if (!line) return null;
+    const s = String(line).trim();
+    if (!s) return null;
+    // 忽略注释行
+    if (s.startsWith('#') || s.startsWith('//')) return null;
+
+    // CSV: ip,port,cc,remark...
+    if (s.includes(',')) {
+        const cols = s.split(',').map(c => c.trim());
+        if (cols.length >= 2 && /^\d+$/.test(cols[1])) {
+            const ipRaw = cols[0].replace(/^[\[]|[\]]$/g, '');
+            const port = parseInt(cols[1], 10);
+            if (!Number.isFinite(port) || port <= 0 || port >= 65536) return null;
+            const cc = cols[2] ? cols[2] : '';
+            const remark = cols.slice(3).join(',').trim();
+            const name = (cc && remark) ? `${cc}-${remark}` : (remark || cc || ipRaw);
+            return { ip: ipRaw, port, name };
+        }
+    }
+
+    // IP:PORT#remark 或 IP:PORT
+    const m = s.match(/^(\[[^\]]+\]|[^:#]+):(\d+)(?:#(.*))?$/);
+    if (m) {
+        const ipRaw = m[1].replace(/[\[\]]/g, '');
+        const port = parseInt(m[2], 10);
+        if (!Number.isFinite(port) || port <= 0 || port >= 65536) return null;
+        const remark = (m[3] || '').trim();
+        return { ip: ipRaw, port, name: remark || ipRaw };
+    }
+
+    return null;
+}
+
+// 从GitHub获取优选IP（支持旧格式与CSV格式）
 async function fetchAndParseNewIPs(piu) {
     const url = piu || defaultIPURL;
     try {
@@ -230,20 +268,10 @@ async function fetchAndParseNewIPs(piu) {
         if (!response.ok) return [];
         const text = await response.text();
         const results = [];
-        const lines = text.trim().replace(/\r/g, "").split('\n');
-        const regex = /^([^:]+):(\d+)#(.*)$/;
-
+        const lines = text.replace(/\r/g, "").split('\n');
         for (const line of lines) {
-            const trimmedLine = line.trim();
-            if (!trimmedLine) continue;
-            const match = trimmedLine.match(regex);
-            if (match) {
-                results.push({
-                    ip: match[1],
-                    port: parseInt(match[2], 10),
-                    name: match[3].trim() || match[1]
-                });
-            }
+            const parsed = parsePreferredLine(line);
+            if (parsed) results.push(parsed);
         }
         return results;
     } catch (error) {
@@ -569,36 +597,21 @@ async function handleSubscriptionRequest(request, user, customDomain, piu, ipv4E
     // GitHub优选 / 优选API
     if (egi) {
         try {
-            // 检查是否是优选API URL（以https://开头）
+            // 单URL：优先按“GitHub优选文件”解析（支持旧格式 + CSV），解析不到再回退到“优选API”
             if (piu && piu.toLowerCase().startsWith('https://')) {
-                // 从优选API获取IP列表
-                const 优选API的IP = await 请求优选API([piu]);
-                if (优选API的IP && 优选API的IP.length > 0) {
-                    // 解析IP字符串格式：IP:端口#备注
-                    const IP列表 = 优选API的IP.map(原始地址 => {
-                        // 统一正则: 匹配 域名/IPv4/IPv6地址 + 可选端口 + 可选备注
-                        const regex = /^(\[[\da-fA-F:]+\]|[\d.]+|[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)*)(?::(\d+))?(?:#(.+))?$/;
-                        const match = 原始地址.match(regex);
-
-                        if (match) {
-                            const 节点地址 = match[1].replace(/[\[\]]/g, ''); // 移除IPv6的方括号
-                            const 节点端口 = match[2] || 443;
-                            const 节点备注 = match[3] || 节点地址;
-                            return {
-                                ip: 节点地址,
-                                port: parseInt(节点端口),
-                                name: 节点备注
-                            };
-                        }
-                        return null;
-                    }).filter(item => item !== null);
-                    
-                    if (IP列表.length > 0) {
-                        const hasProtocol = evEnabled || etEnabled || vmEnabled;
-                        const useVL = hasProtocol ? evEnabled : true;
-                        
-                        if (useVL) {
-                            finalLinks.push(...generateLinksFromNewIPs(IP列表, user, nodeDomain, wsPath));
+                // 1) 先当作 GitHub/raw 文本（支持：IP:PORT#备注 & IP,PORT,CC,ISP）
+                const newIPList = await fetchAndParseNewIPs(piu);
+                if (newIPList.length > 0) {
+                    await addNodesFromList(newIPList);
+                } else {
+                    // 2) 回退：尝试按“优选API”解析
+                    const 优选API的IP = await 请求优选API([piu]);
+                    if (优选API的IP && 优选API的IP.length > 0) {
+                        const IP列表 = 优选API的IP
+                            .map(原始地址 => parsePreferredLine(原始地址))
+                            .filter(Boolean);
+                        if (IP列表.length > 0) {
+                            await addNodesFromList(IP列表);
                         }
                     }
                 }
@@ -625,42 +638,19 @@ async function handleSubscriptionRequest(request, user, customDomain, piu, ipv4E
                 
                 // 解析所有IP并生成节点
                 if (优选IP.length > 0) {
-                    const IP列表 = 优选IP.map(原始地址 => {
-                        const regex = /^(\[[\da-fA-F:]+\]|[\d.]+|[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)*)(?::(\d+))?(?:#(.+))?$/;
-                        const match = 原始地址.match(regex);
-
-                        if (match) {
-                            const 节点地址 = match[1].replace(/[\[\]]/g, '');
-                            const 节点端口 = match[2] || 443;
-                            const 节点备注 = match[3] || 节点地址;
-                            return {
-                                ip: 节点地址,
-                                port: parseInt(节点端口),
-                                name: 节点备注
-                            };
-                        }
-                        return null;
-                    }).filter(item => item !== null);
+                    const IP列表 = 优选IP
+                        .map(原始地址 => parsePreferredLine(原始地址))
+                        .filter(Boolean);
                     
                     if (IP列表.length > 0) {
-                        const hasProtocol = evEnabled || etEnabled || vmEnabled;
-                        const useVL = hasProtocol ? evEnabled : true;
-                        
-                        if (useVL) {
-                            finalLinks.push(...generateLinksFromNewIPs(IP列表, user, nodeDomain, wsPath));
-                        }
+                        await addNodesFromList(IP列表);
                     }
                 }
             } else {
                 // 原有的GitHub优选逻辑（单URL）
                 const newIPList = await fetchAndParseNewIPs(piu);
                 if (newIPList.length > 0) {
-                    const hasProtocol = evEnabled || etEnabled || vmEnabled;
-                    const useVL = hasProtocol ? evEnabled : true;
-                    
-                    if (useVL) {
-                        finalLinks.push(...generateLinksFromNewIPs(newIPList, user, nodeDomain, wsPath));
-                    }
+                    await addNodesFromList(newIPList);
                 }
             }
         } catch (error) {
