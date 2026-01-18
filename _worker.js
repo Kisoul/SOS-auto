@@ -297,35 +297,35 @@ function generateLinksFromSource(list, user, workerDomain, disableNonTLS = false
         const safeIP = item.ip.includes(':') ? `[${item.ip}]` : item.ip;
         
         let portsToGenerate = [];
-        
-        if (item.port) {
+
+        // 规则：
+        // 1) 只要用户填写了自定义端口（ports=），则全局强制使用该端口列表（覆盖 GitHub 自带端口）
+        // 2) 仅TLS（dkby=yes）永远生效：过滤所有非TLS端口（如 80/8080/2052 等）
+        const useCustom = Array.isArray(customPorts) && customPorts.length > 0;
+
+        if (useCustom) {
+            customPorts.forEach(port => {
+                const isHttp = CF_HTTP_PORTS.includes(port);
+                const isHttps = CF_HTTPS_PORTS.includes(port);
+                if (disableNonTLS && isHttp) return;
+                if (isHttps) portsToGenerate.push({ port, tls: true });
+                else if (isHttp) portsToGenerate.push({ port, tls: false });
+                else portsToGenerate.push({ port, tls: true });
+            });
+        } else if (item.port) {
             const port = item.port;
-            if (CF_HTTPS_PORTS.includes(port)) {
-                portsToGenerate.push({ port: port, tls: true });
-            } else if (CF_HTTP_PORTS.includes(port)) {
-                portsToGenerate.push({ port: port, tls: false });
-            } else {
-                portsToGenerate.push({ port: port, tls: true });
+            const isHttp = CF_HTTP_PORTS.includes(port);
+            const isHttps = CF_HTTPS_PORTS.includes(port);
+            if (disableNonTLS && isHttp) {
+                // 仅TLS：过滤掉 GitHub 里自带的非TLS端口
+                return;
             }
+            if (isHttps) portsToGenerate.push({ port, tls: true });
+            else if (isHttp) portsToGenerate.push({ port, tls: false });
+            else portsToGenerate.push({ port, tls: true });
         } else {
-            const useCustom = Array.isArray(customPorts) && customPorts.length > 0;
-            if (useCustom) {
-                customPorts.forEach(port => {
-                    const isHttp = CF_HTTP_PORTS.includes(port);
-                    const isHttps = CF_HTTPS_PORTS.includes(port);
-                    if (disableNonTLS && isHttp) return;
-                    if (isHttps) portsToGenerate.push({ port, tls: true });
-                    else if (isHttp) portsToGenerate.push({ port, tls: false });
-                    else portsToGenerate.push({ port, tls: true });
-                });
-            } else {
-                defaultHttpsPorts.forEach(port => {
-                    portsToGenerate.push({ port: port, tls: true });
-                });
-                defaultHttpPorts.forEach(port => {
-                    portsToGenerate.push({ port: port, tls: false });
-                });
-            }
+            defaultHttpsPorts.forEach(port => portsToGenerate.push({ port, tls: true }));
+            defaultHttpPorts.forEach(port => portsToGenerate.push({ port, tls: false }));
         }
 
         portsToGenerate.forEach(({ port, tls }) => {
@@ -375,37 +375,34 @@ async function generateTrojanLinksFromSource(list, user, workerDomain, disableNo
         const safeIP = item.ip.includes(':') ? `[${item.ip}]` : item.ip;
         
         let portsToGenerate = [];
-        
-        if (item.port) {
+
+        // 与 VLESS 一致的规则：
+        // 1) 只要用户填写了自定义端口（ports=），则全局强制使用该端口列表（覆盖 GitHub 自带端口）
+        // 2) 仅TLS（dkby=yes）永远生效：过滤所有非TLS端口（如 80/8080/2052 等）
+        const useCustom = Array.isArray(customPorts) && customPorts.length > 0;
+
+        if (useCustom) {
+            customPorts.forEach(port => {
+                const isHttp = CF_HTTP_PORTS.includes(port);
+                const isHttps = CF_HTTPS_PORTS.includes(port);
+                if (disableNonTLS && isHttp) return;
+                if (isHttps) portsToGenerate.push({ port, tls: true });
+                else if (isHttp) portsToGenerate.push({ port, tls: false });
+                else portsToGenerate.push({ port, tls: true });
+            });
+        } else if (item.port) {
             const port = item.port;
-            if (CF_HTTPS_PORTS.includes(port)) {
-                portsToGenerate.push({ port: port, tls: true });
-            } else if (CF_HTTP_PORTS.includes(port)) {
-                if (!disableNonTLS) {
-                    portsToGenerate.push({ port: port, tls: false });
-                }
-            } else {
-                portsToGenerate.push({ port: port, tls: true });
+            const isHttp = CF_HTTP_PORTS.includes(port);
+            const isHttps = CF_HTTPS_PORTS.includes(port);
+            if (disableNonTLS && isHttp) {
+                return;
             }
+            if (isHttps) portsToGenerate.push({ port, tls: true });
+            else if (isHttp) portsToGenerate.push({ port, tls: false });
+            else portsToGenerate.push({ port, tls: true });
         } else {
-            const useCustom = Array.isArray(customPorts) && customPorts.length > 0;
-            if (useCustom) {
-                customPorts.forEach(port => {
-                    const isHttp = CF_HTTP_PORTS.includes(port);
-                    const isHttps = CF_HTTPS_PORTS.includes(port);
-                    if (disableNonTLS && isHttp) return;
-                    if (isHttps) portsToGenerate.push({ port, tls: true });
-                    else if (isHttp) portsToGenerate.push({ port, tls: false });
-                    else portsToGenerate.push({ port, tls: true });
-                });
-            } else {
-                defaultHttpsPorts.forEach(port => {
-                    portsToGenerate.push({ port: port, tls: true });
-                });
-                defaultHttpPorts.forEach(port => {
-                    portsToGenerate.push({ port: port, tls: false });
-                });
-            }
+            defaultHttpsPorts.forEach(port => portsToGenerate.push({ port, tls: true }));
+            defaultHttpPorts.forEach(port => portsToGenerate.push({ port, tls: false }));
         }
 
         portsToGenerate.forEach(({ port, tls }) => {
@@ -452,37 +449,34 @@ function generateVMessLinksFromSource(list, user, workerDomain, disableNonTLS = 
         const safeIP = item.ip.includes(':') ? `[${item.ip}]` : item.ip;
         
         let portsToGenerate = [];
-        
-        if (item.port) {
+
+        // 与 VLESS 一致的规则：
+        // 1) 只要用户填写了自定义端口（ports=），则全局强制使用该端口列表（覆盖 GitHub 自带端口）
+        // 2) 仅TLS（dkby=yes）永远生效：过滤所有非TLS端口（如 80/8080/2052 等）
+        const useCustom = Array.isArray(customPorts) && customPorts.length > 0;
+
+        if (useCustom) {
+            customPorts.forEach(port => {
+                const isHttp = CF_HTTP_PORTS.includes(port);
+                const isHttps = CF_HTTPS_PORTS.includes(port);
+                if (disableNonTLS && isHttp) return;
+                if (isHttps) portsToGenerate.push({ port, tls: true });
+                else if (isHttp) portsToGenerate.push({ port, tls: false });
+                else portsToGenerate.push({ port, tls: true });
+            });
+        } else if (item.port) {
             const port = item.port;
-            if (CF_HTTPS_PORTS.includes(port)) {
-                portsToGenerate.push({ port: port, tls: true });
-            } else if (CF_HTTP_PORTS.includes(port)) {
-                if (!disableNonTLS) {
-                    portsToGenerate.push({ port: port, tls: false });
-                }
-            } else {
-                portsToGenerate.push({ port: port, tls: true });
+            const isHttp = CF_HTTP_PORTS.includes(port);
+            const isHttps = CF_HTTPS_PORTS.includes(port);
+            if (disableNonTLS && isHttp) {
+                return;
             }
+            if (isHttps) portsToGenerate.push({ port, tls: true });
+            else if (isHttp) portsToGenerate.push({ port, tls: false });
+            else portsToGenerate.push({ port, tls: true });
         } else {
-            const useCustom = Array.isArray(customPorts) && customPorts.length > 0;
-            if (useCustom) {
-                customPorts.forEach(port => {
-                    const isHttp = CF_HTTP_PORTS.includes(port);
-                    const isHttps = CF_HTTPS_PORTS.includes(port);
-                    if (disableNonTLS && isHttp) return;
-                    if (isHttps) portsToGenerate.push({ port, tls: true });
-                    else if (isHttp) portsToGenerate.push({ port, tls: false });
-                    else portsToGenerate.push({ port, tls: true });
-                });
-            } else {
-                defaultHttpsPorts.forEach(port => {
-                    portsToGenerate.push({ port: port, tls: true });
-                });
-                defaultHttpPorts.forEach(port => {
-                    portsToGenerate.push({ port: port, tls: false });
-                });
-            }
+            defaultHttpsPorts.forEach(port => portsToGenerate.push({ port, tls: true }));
+            defaultHttpPorts.forEach(port => portsToGenerate.push({ port, tls: false }));
         }
 
         portsToGenerate.forEach(({ port, tls }) => {
