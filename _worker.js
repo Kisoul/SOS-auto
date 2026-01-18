@@ -223,9 +223,6 @@ async function 请求优选API(urls, 默认端口 = '2053', 超时时间 = 3000)
 }
 
 // 从GitHub获取优选IP（保留原有功能，同时支持优选API）
-// 支持格式：
-// 1) IP:PORT#备注
-// 2) IP,PORT,国家,备注（逗号分隔；后续列会合并为备注）
 async function fetchAndParseNewIPs(piu) {
     const url = piu || defaultIPURL;
     try {
@@ -234,39 +231,18 @@ async function fetchAndParseNewIPs(piu) {
         const text = await response.text();
         const results = [];
         const lines = text.trim().replace(/\r/g, "").split('\n');
-
-        // 传统格式：ip:port#name
-        const regexLegacy = /^([^:]+):(\d+)#(.*)$/;
+        const regex = /^([^:]+):(\d+)#(.*)$/;
 
         for (const line of lines) {
             const trimmedLine = line.trim();
             if (!trimmedLine) continue;
-
-            // 1) 先尝试传统格式
-            const m1 = trimmedLine.match(regexLegacy);
-            if (m1) {
+            const match = trimmedLine.match(regex);
+            if (match) {
                 results.push({
-                    ip: m1[1].trim(),
-                    port: parseInt(m1[2], 10),
-                    name: (m1[3] || '').trim() || m1[1].trim()
+                    ip: match[1],
+                    port: parseInt(match[2], 10),
+                    name: match[3].trim() || match[1]
                 });
-                continue;
-            }
-
-            // 2) 再尝试 CSV 逗号分隔格式：ip,port,country,remark...
-            //    例：159.60.146.82,443,US,F5 XC
-            if (trimmedLine.includes(',')) {
-                const cols = trimmedLine.split(',').map(s => s.trim());
-                if (cols.length >= 2) {
-                    const ip = cols[0];
-                    const port = parseInt(cols[1], 10);
-                    if (ip && Number.isFinite(port) && port > 0 && port < 65536) {
-                        const country = cols[2] || '';
-                        const remark = cols.slice(3).join(' ').trim();
-                        const name = (country && remark) ? `${country}-${remark}` : (remark || country || ip);
-                        results.push({ ip, port, name });
-                    }
-                }
             }
         }
         return results;
@@ -276,7 +252,7 @@ async function fetchAndParseNewIPs(piu) {
 }
 
 // 生成VLESS链接
-function generateLinksFromSource(list, user, workerDomain, disableNonTLS = false, customPath = '/') {
+function generateLinksFromSource(list, user, workerDomain, disableNonTLS = false, customPath = '/', customPorts = []) {
     const CF_HTTP_PORTS = [80, 8080, 8880, 2052, 2082, 2086, 2095];
     const CF_HTTPS_PORTS = [443, 2053, 2083, 2087, 2096, 8443];
     const defaultHttpsPorts = [2053];
@@ -342,7 +318,7 @@ function generateLinksFromSource(list, user, workerDomain, disableNonTLS = false
 }
 
 // 生成Trojan链接
-async function generateTrojanLinksFromSource(list, user, workerDomain, disableNonTLS = false, customPath = '/') {
+async function generateTrojanLinksFromSource(list, user, workerDomain, disableNonTLS = false, customPath = '/', customPorts = []) {
     const CF_HTTP_PORTS = [80, 8080, 8880, 2052, 2082, 2086, 2095];
     const CF_HTTPS_PORTS = [443, 2053, 2083, 2087, 2096, 8443];
     const defaultHttpsPorts = [443];
@@ -408,7 +384,7 @@ async function generateTrojanLinksFromSource(list, user, workerDomain, disableNo
 }
 
 // 生成VMess链接 (已修复中文名导致1101报错的问题)
-function generateVMessLinksFromSource(list, user, workerDomain, disableNonTLS = false, customPath = '/') {
+function generateVMessLinksFromSource(list, user, workerDomain, disableNonTLS = false, customPath = '/', customPorts = []) {
     const CF_HTTP_PORTS = [80, 8080, 8880, 2052, 2082, 2086, 2095];
     const CF_HTTPS_PORTS = [443, 2053, 2083, 2087, 2096, 8443];
     const defaultHttpsPorts = [443];
@@ -479,7 +455,7 @@ function generateVMessLinksFromSource(list, user, workerDomain, disableNonTLS = 
 }
 
 // 从GitHub IP生成链接（VLESS）
-function generateLinksFromNewIPs(list, user, workerDomain, customPath = '/') {
+function generateLinksFromNewIPs(list, user, workerDomain, customPath = '/', customPorts = [], disableNonTLS = false) {
     const CF_HTTP_PORTS = [80, 8080, 8880, 2052, 2082, 2086, 2095];
     const CF_HTTPS_PORTS = [443, 2053, 2083, 2087, 2096, 8443];
     const links = [];
@@ -508,7 +484,7 @@ function generateLinksFromNewIPs(list, user, workerDomain, customPath = '/') {
 }
 
 // 生成订阅内容
-async function handleSubscriptionRequest(request, user, customDomain, piu, ipv4Enabled, ipv6Enabled, ispMobile, ispUnicom, ispTelecom, evEnabled, etEnabled, vmEnabled, disableNonTLS, customPath) {
+async function handleSubscriptionRequest(request, user, customDomain, piu, ipv4Enabled, ipv6Enabled, ispMobile, ispUnicom, ispTelecom, evEnabled, etEnabled, vmEnabled, disableNonTLS, customPath, customPorts = []) {
     const url = new URL(request.url);
     const finalLinks = [];
     const workerDomain = url.hostname;  // workerDomain始终是请求的hostname
@@ -522,13 +498,13 @@ async function handleSubscriptionRequest(request, user, customDomain, piu, ipv4E
         const useVL = hasProtocol ? evEnabled : true;  // 如果没有选择任何协议，默认使用VLESS
         
         if (useVL) {
-            finalLinks.push(...generateLinksFromSource(list, user, nodeDomain, disableNonTLS, wsPath));
+            finalLinks.push(...generateLinksFromSource(list, user, nodeDomain, disableNonTLS, wsPath, customPorts));
         }
         if (etEnabled) {
-            finalLinks.push(...await generateTrojanLinksFromSource(list, user, nodeDomain, disableNonTLS, wsPath));
+            finalLinks.push(...await generateTrojanLinksFromSource(list, user, nodeDomain, disableNonTLS, wsPath, customPorts));
         }
         if (vmEnabled) {
-            finalLinks.push(...generateVMessLinksFromSource(list, user, nodeDomain, disableNonTLS, wsPath));
+            finalLinks.push(...generateVMessLinksFromSource(list, user, nodeDomain, disableNonTLS, wsPath, customPorts));
         }
     }
 
@@ -1230,6 +1206,12 @@ function generateHomePage(scuValue) {
                 <input type="text" id="customPath" placeholder="留空则使用默认路径 /" value="/">
                 <small style="display: block; margin-top: 6px; color: #86868b; font-size: 13px;">自定义WebSocket路径，例如：/v2ray 或 /</small>
             </div>
+            <div class="form-group">
+                <label>自定义端口（可选）</label>
+                <input type="text" id="customPorts" placeholder="例如：443,2053,2096,8443">
+                <small style="display: block; margin-top: 6px; color: #86868b; font-size: 13px;">支持英文逗号分隔；留空则使用默认端口策略</small>
+            </div>
+
             
             <div class="list-item" onclick="toggleSwitch('switchDomain')">
                 <div>
@@ -1419,6 +1401,7 @@ function generateHomePage(scuValue) {
             const domain = document.getElementById('domain').value.trim();
             const uuid = document.getElementById('uuid').value.trim();
             const customPath = document.getElementById('customPath').value.trim() || '/';
+            const customPortsRaw = document.getElementById('customPorts') ? document.getElementById('customPorts').value.trim() : '';
             
             if (!domain || !uuid) {
                 alert('请先填写域名和UUID/Password');
@@ -1466,6 +1449,11 @@ function generateHomePage(scuValue) {
             if (customPath && customPath !== '/') {
                 subscriptionUrl += \`&path=\${encodeURIComponent(customPath)}\`;
             }
+            // 添加自定义端口
+            if (customPortsRaw) {
+                subscriptionUrl += \`&ports=\${encodeURIComponent(customPortsRaw)}\`;
+            }
+
             
             let finalUrl = subscriptionUrl;
             let schemeUrl = '';
@@ -1656,8 +1644,13 @@ export default {
             
             // 自定义路径
             const customPath = url.searchParams.get('path') || '/';
+            const portsParam = url.searchParams.get('ports') || '';
+            const customPorts = portsParam
+                .split(',')
+                .map(s => parseInt(s.trim(), 10))
+                .filter(n => Number.isFinite(n) && n > 0 && n < 65536);
             
-            return await handleSubscriptionRequest(request, uuid, domain, piu, ipv4Enabled, ipv6Enabled, ispMobile, ispUnicom, ispTelecom, evEnabled, etEnabled, vmEnabled, disableNonTLS, customPath);
+            return await handleSubscriptionRequest(request, uuid, domain, piu, ipv4Enabled, ipv6Enabled, ispMobile, ispUnicom, ispTelecom, evEnabled, etEnabled, vmEnabled, disableNonTLS, customPath, customPorts);
         }
         
         return new Response('Not Found', { status: 404 });
