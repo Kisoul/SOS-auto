@@ -1,5 +1,6 @@
-// Cloudflare Worker - 简化版优选工具 (最终完整版)
-// 包含：并发修复、性能优化、以及包含自定义路径/端口的完整 UI 界面
+// Cloudflare Worker - 简化版优选工具 (最终完美版 v2.1)
+// 包含：并发修复、性能优化、Surge生成修复
+// 适配：Clash Meta(Mihomo) VLESS 支持、Surge 协议检测
 
 // --- 1. 常量定义 ---
 const DEFAULT_SCU = 'https://url.v1.mk/sub';
@@ -457,6 +458,7 @@ async function handleSubscriptionRequest(request, envParams) {
     });
 }
 
+// 支持 VLESS 的 Clash 配置生成 (适配 Meta/Mihomo 内核)
 function generateClashConfig(links) {
     let yaml = 'port: 7890\nsocks-port: 7891\nallow-lan: false\nmode: rule\nlog-level: info\n\nproxies:\n';
     const proxyNames = [];
@@ -469,7 +471,9 @@ function generateClashConfig(links) {
                 proxyNames.push(name);
                 yaml += `  - name: ${name}\n    type: vless\n    server: ${url.hostname}\n    port: ${url.port}\n    uuid: ${url.username}\n    tls: ${params.get('security') === 'tls'}\n    network: ws\n    ws-opts:\n      path: ${params.get('path') || '/'}\n      headers:\n        Host: ${params.get('host') || url.hostname}\n`;
                 if (params.get('sni')) yaml += `    servername: ${params.get('sni')}\n`;
+                if (params.get('fp')) yaml += `    client-fingerprint: ${params.get('fp')}\n`;
             }
+            // (Clash 原生支持 Trojan/VMess，如需也可在此扩展)
         } catch(e) {}
     });
     yaml += '\nproxy-groups:\n  - name: PROXY\n    type: select\n    proxies:\n';
@@ -478,23 +482,58 @@ function generateClashConfig(links) {
     return yaml;
 }
 
+// 修复后的 Surge 配置生成函数：支持 Trojan 和 VMess，跳过 VLESS
 function generateSurgeConfig(links) {
     let config = '[Proxy]\n';
     const names = [];
+    
     links.forEach((link, i) => {
-        if(link.startsWith('vless://')) {
-            const url = new URL(link);
-            const params = url.searchParams;
-            const name = decodeURIComponent(url.hash.slice(1)) || `Node-${i}`;
-            names.push(name);
-            config += `${name} = vless, ${url.hostname}, ${url.port}, username=${url.username}, tls=${params.get('security')==='tls'}, ws=true, ws-path=${params.get('path')||'/'}, ws-headers=Host:${params.get('host')||url.hostname}\n`;
-        }
+        try {
+            let name = decodeURIComponent(link.split('#')[1] || `Node-${i}`);
+            let line = '';
+            
+            // 1. 处理 Trojan (Surge 原生支持)
+            if (link.startsWith('trojan://')) {
+                const url = new URL(link);
+                const params = url.searchParams;
+                line = `${name} = trojan, ${url.hostname}, ${url.port}, password=${url.username}`;
+                if (params.get('sni')) line += `, sni=${params.get('sni')}`;
+                if (params.get('allowInsecure') === '1') line += `, skip-cert-verify=true`;
+            } 
+            // 2. 处理 VMess (Surge 原生支持)
+            else if (link.startsWith('vmess://')) {
+                const b64 = link.slice(8);
+                const jsonStr = new TextDecoder().decode(Uint8Array.from(atob(b64), c => c.charCodeAt(0)));
+                const v = JSON.parse(jsonStr);
+                
+                name = v.ps || name;
+                line = `${name} = vmess, ${v.add}, ${v.port}, username=${v.id}`;
+                if (v.tls === 'tls') line += `, tls=true`;
+                if (v.sni) line += `, sni=${v.sni}`;
+                if (v.net === 'ws') {
+                    line += `, ws=true`;
+                    if (v.path) line += `, ws-path=${v.path}`;
+                    if (v.host) line += `, ws-headers=Host:${v.host}`;
+                }
+            }
+            // 3. VLESS (Surge 不支持，直接跳过)
+            
+            if (line) {
+                config += line + '\n';
+                names.push(name);
+            }
+        } catch (e) { }
     });
+
+    if (names.length === 0) {
+        config += '# 警告: 未找到 Surge 支持的节点 (Surge 不支持 VLESS，请勾选 Trojan 或 VMess)\n';
+    }
+
     config += '\n[Proxy Group]\nPROXY = select, ' + names.join(', ') + '\n';
     return config;
 }
 
-// --- 5. 前端界面 (完整版) ---
+// --- 5. 前端界面 (最终版 - 含所有客户端协议监测) ---
 function generateHomePage(scuValue) {
     const scu = scuValue || DEFAULT_SCU;
     return `<!DOCTYPE html>
@@ -654,6 +693,25 @@ function generateHomePage(scuValue) {
             
             if (!domain || !uuid) { alert('请填写域名和UUID'); return; }
             if (!switches.switchVL && !switches.switchTJ && !switches.switchVM) { alert('请至少选择一个协议'); return; }
+
+            // --- 客户端协议兼容性检查 ---
+            
+            // 1. Surge: 不支持 VLESS
+            if (type === 'surge') {
+                if (switches.switchVL) {
+                     if (!switches.switchTJ && !switches.switchVM) {
+                         alert('错误：Surge 客户端不支持 VLESS 协议！\\n\\n当前您只选择了 VLESS，生成的订阅将为空。\\n请勾选 Trojan 或 VMess。');
+                         return;
+                     }
+                     if (!confirm('提示：Surge 客户端不支持 VLESS 协议。\\n\\n生成的订阅将自动忽略 VLESS 节点，仅包含 Trojan/VMess 节点。\\n是否继续？')) {
+                         return;
+                     }
+                }
+            }
+            // 2. Clash: 现在默认支持 VLESS (Meta内核)，无警告
+            // 3. QuanX: 现在版本支持 VLESS，无警告
+            
+            // ---------------------------
 
             const baseUrl = window.location.origin;
             let url = \`\${baseUrl}/\${uuid}/sub?domain=\${encodeURIComponent(domain)}\`;
