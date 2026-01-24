@@ -120,7 +120,7 @@ async function 整理成数组(内容) {
 }
 
 // 请求优选API
-async function 请求优选API(urls, 默认端口 = '2053', 超时时间 = 3000) {
+async function 请求优选API(urls, 默认端口 = '443', 超时时间 = 3000) {
     if (!urls?.length) return [];
     const results = new Set();
     await Promise.allSettled(urls.map(async (url) => {
@@ -255,7 +255,7 @@ async function fetchAndParseNewIPs(piu) {
 function generateLinksFromSource(list, user, workerDomain, disableNonTLS = false, customPath = '/') {
     const CF_HTTP_PORTS = [80, 8080, 8880, 2052, 2082, 2086, 2095];
     const CF_HTTPS_PORTS = [443, 2053, 2083, 2087, 2096, 8443];
-    const defaultHttpsPorts = [2053];
+    const defaultHttpsPorts = [443];
     const defaultHttpPorts = disableNonTLS ? [] : [80];
     const links = [];
     const wsPath = customPath || '/';
@@ -498,13 +498,13 @@ async function handleSubscriptionRequest(request, user, customDomain, piu, ipv4E
         const useVL = hasProtocol ? evEnabled : true;  // 如果没有选择任何协议，默认使用VLESS
         
         if (useVL) {
-            finalLinks.push(...generateLinksFromSource(list, user, nodeDomain, disableNonTLS, wsPath, customPorts));
+            finalLinks.push(...generateLinksFromSource(list, user, nodeDomain, disableNonTLS, wsPath));
         }
         if (etEnabled) {
-            finalLinks.push(...await generateTrojanLinksFromSource(list, user, nodeDomain, disableNonTLS, wsPath, customPorts));
+            finalLinks.push(...await generateTrojanLinksFromSource(list, user, nodeDomain, disableNonTLS, wsPath));
         }
         if (vmEnabled) {
-            finalLinks.push(...generateVMessLinksFromSource(list, user, nodeDomain, disableNonTLS, wsPath, customPorts));
+            finalLinks.push(...generateVMessLinksFromSource(list, user, nodeDomain, disableNonTLS, wsPath));
         }
     }
 
@@ -558,9 +558,12 @@ async function handleSubscriptionRequest(request, user, customDomain, piu, ipv4E
                     }).filter(item => item !== null);
                     
                     if (IP列表.length > 0) {
-                        // 重要：优选来源也要支持 Trojan / VMess / VLESS。
-                        // 统一交给 addNodesFromList，避免仅 VLESS 才能生成的问题。
-                        await addNodesFromList(IP列表);
+                        const hasProtocol = evEnabled || etEnabled || vmEnabled;
+                        const useVL = hasProtocol ? evEnabled : true;
+                        
+                        if (useVL) {
+                            finalLinks.push(...generateLinksFromNewIPs(IP列表, user, nodeDomain, wsPath));
+                        }
                     }
                 }
             } else if (piu && piu.includes('\n')) {
@@ -604,14 +607,24 @@ async function handleSubscriptionRequest(request, user, customDomain, piu, ipv4E
                     }).filter(item => item !== null);
                     
                     if (IP列表.length > 0) {
-                        await addNodesFromList(IP列表);
+                        const hasProtocol = evEnabled || etEnabled || vmEnabled;
+                        const useVL = hasProtocol ? evEnabled : true;
+                        
+                        if (useVL) {
+                            finalLinks.push(...generateLinksFromNewIPs(IP列表, user, nodeDomain, wsPath));
+                        }
                     }
                 }
             } else {
                 // 原有的GitHub优选逻辑（单URL）
                 const newIPList = await fetchAndParseNewIPs(piu);
                 if (newIPList.length > 0) {
-                    await addNodesFromList(newIPList);
+                    const hasProtocol = evEnabled || etEnabled || vmEnabled;
+                    const useVL = hasProtocol ? evEnabled : true;
+                    
+                    if (useVL) {
+                        finalLinks.push(...generateLinksFromNewIPs(newIPList, user, nodeDomain, wsPath));
+                    }
                 }
             }
         } catch (error) {
@@ -708,93 +721,12 @@ function generateClashConfig(links) {
 
 // 生成Surge配置
 function generateSurgeConfig(links) {
-    // Surge / Surfboard: 不支持 VLESS。这里只生成 Surge 能识别的 Trojan / VMess，VLESS 会被跳过。
-    const proxyLines = [];
-
-    function safeDecodeName(link, fallback) {
-        try {
-            return decodeURIComponent(link.split('#')[1] || fallback);
-        } catch (_) {
-            return (link.split('#')[1] || fallback);
-        }
-    }
-
-    function getQS(link) {
-        const q = link.split('?')[1] || '';
-        return new URLSearchParams(q);
-    }
-
-    function parseVmess(link) {
-        const b64 = link.replace(/^vmess:\/\//i, '').split('#')[0];
-        try {
-            // 本脚本生成的 VMess 使用 encodeURIComponent(json) 后再 btoa
-            const jsonStr = decodeURIComponent(atob(b64));
-            return JSON.parse(jsonStr);
-        } catch (e1) {
-            try {
-                const jsonStr = atob(b64);
-                return JSON.parse(jsonStr);
-            } catch (e2) {
-                return null;
-            }
-        }
-    }
-
-    for (let i = 0; i < links.length; i++) {
-        const link = links[i];
-        const name = safeDecodeName(link, `节点${i + 1}`);
-
-        // Trojan
-        if (/^trojan:\/\//i.test(link)) {
-            const server = link.match(/@([^:]+):(\d+)/)?.[1] || '';
-            const port = link.match(/@[^:]+:(\d+)/)?.[1] || '443';
-            const password = link.match(/^trojan:\/\/([^@]+)@/i)?.[1] || '';
-            const qs = getQS(link);
-
-            // security=tls/none
-            const tls = (qs.get('security') || 'tls').toLowerCase() === 'tls';
-            const sni = qs.get('sni') || qs.get('peer') || '';
-            const host = qs.get('host') || sni || '';
-            const path = qs.get('path') || '/';
-            const ws = (qs.get('type') || 'ws').toLowerCase() === 'ws';
-
-            // TLS-only 开关由上游已过滤端口，这里按链接参数输出即可
-            const line = `${name} = trojan, ${server}, ${port}, password=${password}, tls=${tls}, sni=${sni || host}, ws=${ws}, ws-path=${path}, ws-headers=Host:${host}`;
-            proxyLines.push(line);
-            continue;
-        }
-
-        // VMess
-        if (/^vmess:\/\//i.test(link)) {
-            const vm = parseVmess(link);
-            if (!vm) continue;
-            const server = (vm.add || '').replace(/^\[|\]$/g, '');
-            const port = vm.port || '443';
-            const uuid = vm.id || '';
-            const tls = (vm.tls || '').toLowerCase() === 'tls';
-            const host = vm.host || '';
-            const path = vm.path || '/';
-            const sni = vm.sni || host || '';
-
-            // Surge 的 VMess 一般写法：vmess, server, port, username=UUID, ws=true, ws-path=..., ws-headers=Host:..., tls=true, sni=...
-            const line = `${name} = vmess, ${server}, ${port}, username=${uuid}, ws=true, ws-path=${path}, ws-headers=Host:${host}, tls=${tls}, sni=${sni}`;
-            proxyLines.push(line);
-            continue;
-        }
-
-        // VLESS / 其他协议：Surge 不支持，跳过
-    }
-
     let config = '[Proxy]\n';
-    config += proxyLines.join('\n') + '\n';
-    config += '\n[Proxy Group]\n';
-    if (proxyLines.length > 0) {
-        const names = proxyLines.map(line => line.split(' = ')[0]);
-        config += 'PROXY = select, ' + names.join(', ') + '\n';
-    } else {
-        // 兜底：避免 Surge 报空组
-        config += 'PROXY = select, DIRECT\n';
-    }
+    links.forEach(link => {
+        const name = decodeURIComponent(link.split('#')[1] || '节点');
+        config += `${name} = vless, ${link.match(/@([^:]+):(\d+)/)?.[1] || ''}, ${link.match(/@[^:]+:(\d+)/)?.[1] || '443'}, username=${link.match(/vless:\/\/([^@]+)@/)?.[1] || ''}, tls=${link.includes('security=tls')}, ws=true, ws-path=${link.match(/path=([^&#]+)/)?.[1] || '/'}, ws-headers=Host:${link.match(/host=([^&#]+)/)?.[1] || ''}\n`;
+    });
+    config += '\n[Proxy Group]\nPROXY = select, ' + links.map((_, i) => decodeURIComponent(links[i].split('#')[1] || `节点${i + 1}`)).join(', ') + '\n';
     return config;
 }
 
@@ -1622,7 +1554,7 @@ export default {
             }
             
             const apiUrl = url.searchParams.get('url');
-            const port = url.searchParams.get('port') || '2053';
+            const port = url.searchParams.get('port') || '443';
             const timeout = parseInt(url.searchParams.get('timeout') || '3000');
             
             if (!apiUrl) {
