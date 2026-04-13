@@ -39,7 +39,7 @@ const presetClashConfigMap = {
   acl_default: 'https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Online.ini',
   acl_nospeed: 'https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Online_NoSpeed.ini',
   acl_mini: 'https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Mini.ini',
-  ACL_Kisoul: 'https://raw.githubusercontent.com/Kisoul/Rulers/refs/heads/main/Kisoul.ini'
+  acl_Kisoul: 'https://raw.githubusercontent.com/Kisoul/Rulers/refs/heads/main/Kisoul.ini'
 };
 
 // UUID验证
