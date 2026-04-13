@@ -1,8 +1,8 @@
-// Cloudflare Worker - 简化版优选工具（支持 Clash 配置下拉选择 / 自定义远程 .ini）
+// Cloudflare Worker - 简化版优选工具（支持 Clash 配置下拉选择 / 自定义远程远程配置文件）
 // 逻辑：
 // 1. 默认配置：使用 worker 自身的 Clash 生成逻辑
-// 2. 内置配置：从 presetClashConfigMap 读取远程 .ini，交给订阅转换器 scu
-// 3. 自定义配置：用户自行填写远程 .ini，交给订阅转换器 scu
+// 2. 内置配置：从 presetClashConfigMap 读取远程配置文件，交给订阅转换器 scu
+// 3. 自定义配置：用户自行填写远程配置文件，交给订阅转换器 scu
 
 let customPreferredIPs = [];
 let customPreferredDomains = [];
@@ -34,7 +34,7 @@ const directDomains = [
 // 默认优选IP来源URL
 const defaultIPURL = 'https://raw.githubusercontent.com/qwer-search/bestip/refs/heads/main/kejilandbestip.txt';
 
-// 内置 .ini 配置
+// 内置 远程配置文件 配置
 const presetClashConfigMap = {
   acl_default: 'https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Online.ini',
   acl_nospeed: 'https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Online_NoSpeed.ini',
@@ -118,7 +118,7 @@ async function 整理成数组(content) {
 }
 
 // 请求优选API
-async function 请求优选API(urls, 默认端口 = '2053', 超时时间 = 3000) {
+async function 请求优选API(urls, 默认端口 = '443', 超时时间 = 3000) {
   if (!urls || !urls.length) return [];
   const results = new Set();
 
@@ -275,7 +275,7 @@ async function fetchAndParseNewIPs(piu) {
 function generateLinksFromSource(list, user, workerDomain, disableNonTLS = false, customPath = '/', customPorts = []) {
   const CF_HTTP_PORTS = [80, 8080, 8880, 2052, 2082, 2086, 2095];
   const CF_HTTPS_PORTS = [443, 2053, 2083, 2087, 2096, 8443];
-  const defaultHttpsPorts = [2053];
+  const defaultHttpsPorts = [443];
   const defaultHttpPorts = disableNonTLS ? [] : [80];
   const links = [];
   const wsPath = customPath || '/';
@@ -1411,7 +1411,7 @@ export default {
       }
 
       const apiUrl = url.searchParams.get('url');
-      const port = url.searchParams.get('port') || '2053';
+      const port = url.searchParams.get('port') || '443';
       const timeout = parseInt(url.searchParams.get('timeout') || '3000', 10);
 
       if (!apiUrl) {
