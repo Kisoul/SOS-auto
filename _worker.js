@@ -38,7 +38,8 @@ const defaultIPURL = 'https://raw.githubusercontent.com/qwer-search/bestip/refs/
 const presetClashConfigMap = {
   acl_default: 'https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Online.ini',
   acl_nospeed: 'https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Online_NoSpeed.ini',
-  acl_mini: 'https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Mini.ini'
+  acl_mini: 'https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Mini.ini',
+  ACL_Kisoul: 'https://raw.githubusercontent.com/Kisoul/Rulers/refs/heads/main/Kisoul.ini'
 };
 
 // UUID验证
@@ -1004,7 +1005,7 @@ function generateHomePage(scuValue) {
 
       <div class="form-group">
         <label>自定义端口（可选）</label>
-        <input type="text" id="customPorts" placeholder="例如：2053 或 443,2053,2096">
+        <input type="text" id="customPorts" placeholder="例如：443系端口443,2053,2083,2087,2096,8443；80系端口80,8080,8880,2052,2082,2086,2095">
         <small>支持英文逗号分隔；留空则使用默认端口策略</small>
       </div>
 
@@ -1036,15 +1037,16 @@ function generateHomePage(scuValue) {
           <option value="acl_default">内置：ACL4SSR 默认版</option>
           <option value="acl_nospeed">内置：ACL4SSR 无测速版</option>
           <option value="acl_mini">内置：ACL4SSR Mini</option>
-          <option value="custom">自定义远程 .ini</option>
+          <option value="acl_Kisoul">内置：ACL4SSR Kisoul</option>
+          <option value="custom">自定义远程配置文件</option>
         </select>
         <small>默认配置走 worker 原生方案；内置 / 自定义会交给订阅转换器处理</small>
       </div>
 
       <div class="form-group" id="customClashConfigGroup" style="display:none; margin-top:12px;">
-        <label>自定义远程 .ini 地址</label>
+        <label>自定义远程配置文件地址</label>
         <input type="text" id="clashConfigUrl" placeholder="例如：https://example.com/ACL4SSR_Online.ini" style="font-size:15px;">
-        <small>仅在选择“自定义远程 .ini”时生效</small>
+        <small>仅在选择“自定义远程配置文件”时生效</small>
       </div>
 
       <div class="form-group" style="margin-top:24px;">
@@ -1124,7 +1126,7 @@ function generateHomePage(scuValue) {
     </div>
 
     <div class="footer">
-      <p>简化版优选工具 • 默认配置走原生，内置/自定义走远程 .ini</p>
+      <p>简化版优选工具 • 默认配置走原生配置文件，内置/自定义走远程配置文件</p>
     </div>
   </div>
 
