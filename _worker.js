@@ -1,9 +1,8 @@
-// Cloudflare Worker - 简化版优选工具（支持 Clash 配置下拉选择 / 自定义远程配置文件）
+// Cloudflare Worker - 简化版优选工具（支持 Clash 配置下拉选择 / 自定义远程远程配置文件）
 // 逻辑：
 // 1. 默认配置：使用 worker 自身的 Clash 生成逻辑
 // 2. 内置配置：从 presetClashConfigMap 读取远程配置文件，交给订阅转换器 scu
 // 3. 自定义配置：用户自行填写远程配置文件，交给订阅转换器 scu
-// 4. 增强 GitHub 优选解析：支持逐行 / 单行多节点 / 空格分隔纯 IP / CSV / IP:PORT
 
 let customPreferredIPs = [];
 let customPreferredDomains = [];
@@ -35,7 +34,7 @@ const directDomains = [
 // 默认优选IP来源URL
 const defaultIPURL = 'https://raw.githubusercontent.com/qwer-search/bestip/refs/heads/main/kejilandbestip.txt';
 
-// 内置远程配置文件
+// 内置 远程配置文件 配置
 const presetClashConfigMap = {
   acl_default: 'https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Online.ini',
   acl_nospeed: 'https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Online_NoSpeed.ini',
@@ -118,56 +117,6 @@ async function 整理成数组(content) {
   return s.split(',');
 }
 
-// 尝试从文本中提取“单行多节点 CSV”
-function extractMultiCsvRecords(text) {
-  if (!text) return [];
-  const cleaned = text.replace(/\r/g, ' ').replace(/\n/g, ' ').trim();
-  if (!cleaned) return [];
-
-  const records = [];
-  const regex = /(\[?[0-9a-fA-F:.]+\]?|\d{1,3}(?:\.\d{1,3}){3})\s*,\s*(\d{1,5})\s*,\s*([A-Za-z]{2}|[\u4e00-\u9fa5A-Za-z0-9_-]+)\s*,\s*([^,\n\r]+?)(?=(?:\s+(?:\[?[0-9a-fA-F:.]+\]?|\d{1,3}(?:\.\d{1,3}){3})\s*,\s*\d{1,5}\s*,)|$)/g;
-
-  let m;
-  while ((m = regex.exec(cleaned)) !== null) {
-    records.push({
-      ip: String(m[1]).replace(/^\[|\]$/g, ''),
-      port: parseInt(m[2], 10),
-      name: String(m[3]) + '-' + String(m[4]).trim()
-    });
-  }
-
-  return records.filter(x => x.ip && Number.isFinite(x.port));
-}
-
-// 尝试从文本中提取“空格分隔纯 IP”
-function extractBareIPs(text, defaultPort = 443) {
-  if (!text) return [];
-  const normalized = text.replace(/[\r\n\t]+/g, ' ').trim();
-  if (!normalized) return [];
-
-  const parts = normalized.split(/\s+/).map(s => s.trim()).filter(Boolean);
-  const results = [];
-  const seen = new Set();
-
-  for (const p of parts) {
-    const v4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(p);
-    const v6 = /^[0-9a-fA-F:]+$/.test(p) && p.includes(':');
-    if (!v4 && !v6) continue;
-
-    const ip = p.replace(/^\[|\]$/g, '');
-    const key = ip + ':' + defaultPort;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    results.push({
-      ip: ip,
-      port: defaultPort,
-      name: ip
-    });
-  }
-
-  return results;
-}
-
 // 请求优选API
 async function 请求优选API(urls, 默认端口 = '443', 超时时间 = 3000) {
   if (!urls || !urls.length) return [];
@@ -210,26 +159,6 @@ async function 请求优选API(urls, 默认端口 = '443', 超时时间 = 3000) 
 
           if (!text || text.trim().length === 0) return;
         } catch (e) {
-          return;
-        }
-
-        // 先尝试单行多节点 CSV
-        const multiCsvRecords = extractMultiCsvRecords(text);
-        if (multiCsvRecords.length > 0) {
-          multiCsvRecords.forEach(item => {
-            const wrappedIP = item.ip.includes(':') ? '[' + item.ip + ']' : item.ip;
-            results.add(wrappedIP + ':' + item.port + '#' + item.name);
-          });
-          return;
-        }
-
-        // 再尝试纯 IP 列表
-        const bareIps = extractBareIPs(text, parseInt(默认端口, 10) || 443);
-        if (bareIps.length > 0) {
-          bareIps.forEach(item => {
-            const wrappedIP = item.ip.includes(':') ? '[' + item.ip + ']' : item.ip;
-            results.add(wrappedIP + ':' + item.port + '#' + item.name);
-          });
           return;
         }
 
@@ -304,7 +233,6 @@ function parsePreferredLine(line) {
   const s = String(line).trim();
   if (!s || s.startsWith('#') || s.startsWith('//')) return null;
 
-  // CSV
   if (s.includes(',')) {
     const cols = s.split(',').map(c => c.trim());
     if (cols.length >= 2 && /^\d+$/.test(cols[1])) {
@@ -318,7 +246,6 @@ function parsePreferredLine(line) {
     }
   }
 
-  // IP:PORT#备注
   const m = s.match(/^(\[[^\]]+\]|[^:#]+):(\d+)(?:#(.*))?$/);
   if (m) {
     const ipRaw = m[1].replace(/[\[\]]/g, '');
@@ -328,36 +255,17 @@ function parsePreferredLine(line) {
     return { ip: ipRaw, port: port, name: remark || ipRaw };
   }
 
-  // 裸 IP
-  const v4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(s);
-  const v6 = /^[0-9a-fA-F:]+$/.test(s) && s.includes(':');
-  if (v4 || v6) {
-    return { ip: s.replace(/^\[|\]$/g, ''), port: 443, name: s.replace(/^\[|\]$/g, '') };
-  }
-
   return null;
 }
 
 // 从 GitHub 获取优选 IP
-async function fetchAndParseNewIPs(piu, defaultPort = 443) {
+async function fetchAndParseNewIPs(piu) {
   const url = piu || defaultIPURL;
   try {
     const response = await fetch(url);
     if (!response.ok) return [];
     const text = await response.text();
-
-    // 先尝试单行多 CSV
-    const multiCsvRecords = extractMultiCsvRecords(text);
-    if (multiCsvRecords.length > 0) return multiCsvRecords;
-
-    // 再尝试纯 IP
-    const bareIps = extractBareIPs(text, defaultPort);
-    if (bareIps.length > 0) return bareIps;
-
-    return text.replace(/\r/g, '').split('\n').map(parsePreferredLine).filter(Boolean).map(item => {
-      if (!item.port) item.port = defaultPort;
-      return item;
-    });
+    return text.replace(/\r/g, '').split('\n').map(parsePreferredLine).filter(Boolean);
   } catch (e) {
     return [];
   }
@@ -700,14 +608,12 @@ async function handleSubscriptionRequest(request, user, customDomain, piu, ipv4E
 
   if (egi) {
     try {
-      const fallbackPort = (customPorts && customPorts.length > 0) ? customPorts[0] : 443;
-
       if (piu && piu.toLowerCase().startsWith('https://')) {
-        const newIPList = await fetchAndParseNewIPs(piu, fallbackPort);
+        const newIPList = await fetchAndParseNewIPs(piu);
         if (newIPList.length > 0) {
           await addNodesFromList(newIPList);
         } else {
-          const apiIPs = await 请求优选API([piu], String(fallbackPort));
+          const apiIPs = await 请求优选API([piu]);
           if (apiIPs && apiIPs.length > 0) {
             const ipList = apiIPs.map(parsePreferredLine).filter(Boolean);
             if (ipList.length > 0) await addNodesFromList(ipList);
@@ -724,19 +630,16 @@ async function handleSubscriptionRequest(request, user, customDomain, piu, ipv4E
         }
 
         if (apiUrls.length > 0) {
-          const apiIPs = await 请求优选API(apiUrls, String(fallbackPort));
+          const apiIPs = await 请求优选API(apiUrls);
           prefIPs.push(...apiIPs);
         }
 
         if (prefIPs.length > 0) {
-          const ipList = prefIPs.map(parsePreferredLine).filter(Boolean).map(item => {
-            if (!item.port) item.port = fallbackPort;
-            return item;
-          });
+          const ipList = prefIPs.map(parsePreferredLine).filter(Boolean);
           if (ipList.length > 0) await addNodesFromList(ipList);
         }
       } else {
-        const newIPList = await fetchAndParseNewIPs(piu, fallbackPort);
+        const newIPList = await fetchAndParseNewIPs(piu);
         if (newIPList.length > 0) await addNodesFromList(newIPList);
       }
     } catch (error) {
@@ -1103,7 +1006,7 @@ function generateHomePage(scuValue) {
       <div class="form-group">
         <label>自定义端口（可选）</label>
         <input type="text" id="customPorts" placeholder="留空则使用443端口">
-        <small>支持英文逗号分隔；例如：443,2053,2083,2087,2096,8443</small>
+        <small>支持英文逗号分隔；例如：TLS端口：443,2053,2083,2087,2096,8443非TLS端口：80,8080,8880,2052,2082,2086,2095</small>
       </div>
 
       <div class="list-item" onclick="toggleSwitch('switchDomain')">
@@ -1124,7 +1027,7 @@ function generateHomePage(scuValue) {
       <div class="form-group" id="githubUrlGroup" style="margin-top:12px;">
         <label>GitHub优选URL（可选）</label>
         <input type="text" id="githubUrl" placeholder="留空则使用默认地址" style="font-size:15px;">
-        <small>支持逐行、单行多CSV、空格分隔纯IP</small>
+        <small>自定义优选IP列表来源URL，留空则使用默认地址</small>
       </div>
 
       <div class="form-group" id="clashConfigModeGroup" style="margin-top:12px;">
@@ -1134,7 +1037,7 @@ function generateHomePage(scuValue) {
           <option value="acl_default">内置：ACL4SSR 默认版</option>
           <option value="acl_nospeed">内置：ACL4SSR 无测速版</option>
           <option value="acl_mini">内置：ACL4SSR Mini</option>
-          <option value="acl_Kisoul">内置：Kisoul</option>
+          <option value="acl_Kisoul">内置：ACL4SSR Kisoul</option>
           <option value="custom">自定义远程配置文件</option>
         </select>
         <small>默认配置走 worker 原生方案；内置 / 自定义会交给订阅转换器处理</small>
@@ -1223,7 +1126,7 @@ function generateHomePage(scuValue) {
     </div>
 
     <div class="footer">
-      <p>简化版优选工具 • 默认配置走原生，内置/自定义走远程配置文件</p>
+      <p>简化版优选工具 • 默认配置走原生配置文件，内置/自定义走远程配置文件</p>
     </div>
   </div>
 
@@ -1317,14 +1220,12 @@ function generateHomePage(scuValue) {
       const currentUrl = new URL(window.location.href);
       const baseUrl = currentUrl.origin;
 
-      const githubEnabled = switches.switchGitHub || !!githubUrl;
-
       let subscriptionUrl = baseUrl + '/' + uuid + '/sub?domain=' + encodeURIComponent(domain)
         + '&epd=' + (switches.switchDomain ? 'yes' : 'no')
         + '&epi=' + (switches.switchIP ? 'yes' : 'no')
-        + '&egi=' + (githubEnabled ? 'yes' : 'no');
+        + '&egi=' + (switches.switchGitHub ? 'yes' : 'no');
 
-      if (githubEnabled && githubUrl) subscriptionUrl += '&piu=' + encodeURIComponent(githubUrl);
+      if (githubUrl) subscriptionUrl += '&piu=' + encodeURIComponent(githubUrl);
       if (switches.switchVL) subscriptionUrl += '&ev=yes';
       if (switches.switchTJ) subscriptionUrl += '&et=yes';
       if (switches.switchVM) subscriptionUrl += '&mess=yes';
@@ -1349,6 +1250,7 @@ function generateHomePage(scuValue) {
       let displayName = clientName || '';
       const urlElement = document.getElementById('clientSubscriptionUrl');
 
+      // V2Ray类客户端直接使用原始订阅
       if (clientType === 'v2ray') {
         urlElement.textContent = finalUrl;
         urlElement.style.display = 'block';
@@ -1382,6 +1284,7 @@ function generateHomePage(scuValue) {
         return;
       }
 
+      // Clash / Stash 特殊逻辑
       if (clientType === 'clash') {
         if (!finalClashConfigUrl) {
           finalUrl = subscriptionUrl + '&target=clash';
@@ -1422,6 +1325,7 @@ function generateHomePage(scuValue) {
         return;
       }
 
+      // 其他客户端仍走订阅转换器
       const encodedUrl = encodeURIComponent(subscriptionUrl);
       finalUrl = SUB_CONVERTER_URL
         + '?target=' + clientType
