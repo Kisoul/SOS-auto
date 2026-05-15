@@ -16,7 +16,19 @@ let scu = 'https://url.v1.mk/sub';
 
 // 默认优选域名列表
 const directDomains = [
-  { name: 'cloudflare.182682.xyz', domain: 'cloudflare.182682.xyz' },
+  { domain: 'top1.kisoul.org' },
+  { domain: 'top2.kisoul.org' },
+  { domain: 'telecom1.kisoul.org' },
+  { domain: 'telecom2.kisoul.org' },
+  { domain: 'hkt1.kisoul.org' },
+  { domain: 'hkt2.kisoul.org' },
+  { domain: 'hku1.kisoul.org' }, 
+  { domain: 'hku2.kisoul.org' },
+  { domain: 'hkm1.kisoul.org' },
+  { domain: 'hkm2.kisoul.org' },
+  { domain: 'unicom1.kisoul.org' },
+  { domain: 'unicom2.kisoul.org' },
+  { domain: 'cloudflare.182682.xyz' },
   { domain: 'freeyx.cloudflare88.eu.org' },
   { domain: 'bestcf.top' },
   { domain: 'cdn.2020111.xyz' },
