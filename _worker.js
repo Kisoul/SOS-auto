@@ -273,11 +273,76 @@ function parsePreferredLine(line) {
 // 从 GitHub 获取优选 IP
 async function fetchAndParseNewIPs(piu) {
   const url = piu || defaultIPURL;
+
+  function isIPv4(s) {
+    const parts = s.split('.');
+    if (parts.length !== 4) return false;
+    return parts.every(p => {
+      if (!/^\d+$/.test(p)) return false;
+      const n = Number(p);
+      return n >= 0 && n <= 255;
+    });
+  }
+
+  function isIPv6(s) {
+    const v = s.replace(/^\[|\]$/g, '');
+    return v.includes(':') && /^[0-9a-fA-F:]+$/.test(v);
+  }
+
+  function makeDefaultItem(ip) {
+    const clean = ip.replace(/^\[|\]$/g, '').trim();
+    if (!clean) return null;
+
+    if (isIPv4(clean) || isIPv6(clean)) {
+      return {
+        ip: clean,
+        port: 443,
+        name: clean
+      };
+    }
+
+    return null;
+  }
+
   try {
     const response = await fetch(url);
     if (!response.ok) return [];
+
     const text = await response.text();
-    return text.replace(/\r/g, '').split('\n').map(parsePreferredLine).filter(Boolean);
+    const lines = text
+      .replace(/\r/g, '\n')
+      .split('\n')
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    const results = [];
+
+    for (const line of lines) {
+      if (!line || line.startsWith('#') || line.startsWith('//')) continue;
+
+      // 1. 先走原来的解析逻辑，保证继续支持：
+      //    IP:端口#备注
+      //    IP,端口,地区,备注
+      const parsed = parsePreferredLine(line);
+      if (parsed) {
+        results.push(parsed);
+        continue;
+      }
+
+      // 2. 原格式解析失败后，再兼容一整行裸 IP：
+      //    IP1,IP2,IP3
+      const parts = line
+        .split(/[，,;\s]+/)
+        .map(s => s.trim())
+        .filter(Boolean);
+
+      for (const part of parts) {
+        const item = makeDefaultItem(part);
+        if (item) results.push(item);
+      }
+    }
+
+    return results;
   } catch (e) {
     return [];
   }
