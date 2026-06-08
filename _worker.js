@@ -1202,7 +1202,7 @@ function generateHomePage(scuValue) {
       <div class="list-item" onclick="toggleSwitch('switchXUDP')">
         <div>
           <div class="list-item-label">XUDP（UDP流量的优化扩展技术）</div>
-          <div class="list-item-description">启用后订阅转换链接使用 xudp=true，关闭则使用 xudp=false</div>
+          <div class="list-item-description">启用后开启“UDP流量的优化扩展技术”</div>
         </div>
         <div class="switch active" id="switchXUDP"></div>
       </div>
@@ -1210,7 +1210,7 @@ function generateHomePage(scuValue) {
       <div class="list-item" onclick="toggleSwitch('switchUDP')">
         <div>
           <div class="list-item-label">UDP（UDP流量转发）</div>
-          <div class="list-item-description">启用后订阅转换链接使用 udp=true，关闭则使用 udp=false</div>
+          <div class="list-item-description">启用后开启“UDP流量转发”功能</div>
         </div>
         <div class="switch active" id="switchUDP"></div>
       </div>
@@ -1218,7 +1218,7 @@ function generateHomePage(scuValue) {
       <div class="list-item" onclick="toggleSwitch('switchTFO')">
         <div>
           <div class="list-item-label">TFO（TCP快速打开）</div>
-          <div class="list-item-description">启用后订阅转换链接使用 tfo=true，关闭则使用 tfo=false</div>
+          <div class="list-item-description">启用后开启“TCP快速打开”功能</div>
         </div>
         <div class="switch active" id="switchTFO"></div>
       </div>
@@ -1226,7 +1226,7 @@ function generateHomePage(scuValue) {
       <div class="list-item" onclick="toggleSwitch('switchEmoji')">
         <div>
           <div class="list-item-label">Emoji（显示国家/地区或平台图标）</div>
-          <div class="list-item-description">启用后订阅转换链接使用 emoji=true，关闭则使用 emoji=false</div>
+          <div class="list-item-description">启用后开启“显示国家/地区或平台图标”功能</div>
         </div>
         <div class="switch active" id="switchEmoji"></div>
       </div>
@@ -1234,7 +1234,7 @@ function generateHomePage(scuValue) {
       <div class="list-item" onclick="toggleSwitch('switchExpand')">
         <div>
           <div class="list-item-label">Expand（本地化远程规则）</div>
-          <div class="list-item-description">启用后订阅转换链接使用 expand=true，关闭则使用 expand=false</div>
+          <div class="list-item-description">启用后开启“将远程规则展开并写入本地配置文件”功能</div>
         </div>
         <div class="switch active" id="switchExpand"></div>
       </div>
@@ -1242,7 +1242,7 @@ function generateHomePage(scuValue) {
       <div class="list-item" onclick="toggleSwitch('switchNewName')">
         <div>
           <div class="list-item-label">New Name（启用 Clash 新版本的字段格式）</div>
-          <div class="list-item-description">启用后订阅转换链接使用 new_name=true，关闭则使用 new_name=false</div>
+          <div class="list-item-description">启用后订阅转换链接使用 Clash 新版本的字段格式</div>
         </div>
         <div class="switch active" id="switchNewName"></div>
       </div>
@@ -1250,7 +1250,7 @@ function generateHomePage(scuValue) {
       <div class="list-item" onclick="toggleSwitch('switchSCV')">
         <div>
           <div class="list-item-label">SCV（跳过证书验证）</div>
-          <div class="list-item-description">启用后订阅转换链接使用 scv=true，关闭则使用 scv=false</div>
+          <div class="list-item-description">启用后开启“跳过证书验证”功能</div>
         </div>
         <div class="switch active" id="switchSCV"></div>
       </div>
@@ -1258,7 +1258,7 @@ function generateHomePage(scuValue) {
       <div class="list-item" onclick="toggleSwitch('switchFDN')">
         <div>
           <div class="list-item-label">FDN（过滤废弃/失效节点）</div>
-          <div class="list-item-description">启用后订阅转换链接使用 fdn=true，关闭则使用 fdn=false</div>
+          <div class="list-item-description">启用后开启“过滤废弃/失效节点”功能</div>
         </div>
         <div class="switch active" id="switchFDN"></div>
       </div>
