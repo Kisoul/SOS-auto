@@ -1214,6 +1214,54 @@ function generateHomePage(scuValue) {
         </div>
         <div class="switch active" id="switchUDP"></div>
       </div>
+
+      <div class="list-item" onclick="toggleSwitch('switchTFO')">
+        <div>
+          <div class="list-item-label">TFO</div>
+          <div class="list-item-description">启用后订阅转换链接使用 tfo=true，关闭则使用 tfo=false</div>
+        </div>
+        <div class="switch active" id="switchTFO"></div>
+      </div>
+
+      <div class="list-item" onclick="toggleSwitch('switchEmoji')">
+        <div>
+          <div class="list-item-label">Emoji</div>
+          <div class="list-item-description">启用后订阅转换链接使用 emoji=true，关闭则使用 emoji=false</div>
+        </div>
+        <div class="switch active" id="switchEmoji"></div>
+      </div>
+
+      <div class="list-item" onclick="toggleSwitch('switchExpand')">
+        <div>
+          <div class="list-item-label">Expand</div>
+          <div class="list-item-description">启用后订阅转换链接使用 expand=true，关闭则使用 expand=false</div>
+        </div>
+        <div class="switch active" id="switchExpand"></div>
+      </div>
+
+      <div class="list-item" onclick="toggleSwitch('switchNewName')">
+        <div>
+          <div class="list-item-label">New Name</div>
+          <div class="list-item-description">启用后订阅转换链接使用 new_name=true，关闭则使用 new_name=false</div>
+        </div>
+        <div class="switch active" id="switchNewName"></div>
+      </div>
+
+      <div class="list-item" onclick="toggleSwitch('switchSCV')">
+        <div>
+          <div class="list-item-label">SCV</div>
+          <div class="list-item-description">启用后订阅转换链接使用 scv=true，关闭则使用 scv=false</div>
+        </div>
+        <div class="switch active" id="switchSCV"></div>
+      </div>
+
+      <div class="list-item" onclick="toggleSwitch('switchFDN')">
+        <div>
+          <div class="list-item-label">FDN</div>
+          <div class="list-item-description">启用后订阅转换链接使用 fdn=true，关闭则使用 fdn=false</div>
+        </div>
+        <div class="switch active" id="switchFDN"></div>
+      </div>
     </div>
 
     <div class="footer">
@@ -1231,7 +1279,13 @@ function generateHomePage(scuValue) {
       switchVM: false,
       switchTLS: false,
       switchXUDP: true,
-      switchUDP: true
+      switchUDP: true,
+      switchTFO: true,
+      switchEmoji: true,
+      switchExpand: true,
+      switchNewName: true,
+      switchSCV: true,
+      switchFDN: true
     };
 
     const SUB_CONVERTER_URL = "${realScu}";
@@ -1311,6 +1365,12 @@ function generateHomePage(scuValue) {
       const ispTelecom = document.getElementById('ispTelecom').checked;
       const xudpEnabled = switches.switchXUDP;
       const udpEnabled = switches.switchUDP;
+      const tfoEnabled = switches.switchTFO;
+      const emojiEnabled = switches.switchEmoji;
+      const expandEnabled = switches.switchExpand;
+      const newNameEnabled = switches.switchNewName;
+      const scvEnabled = switches.switchSCV;
+      const fdnEnabled = switches.switchFDN;
 
       const currentUrl = new URL(window.location.href);
       const baseUrl = currentUrl.origin;
@@ -1390,15 +1450,15 @@ function generateHomePage(scuValue) {
             + '&url=' + encodedUrl
             + '&config=' + encodeURIComponent(finalClashConfigUrl)
             + '&insert=false'
-            + '&emoji=true'
+            + '&emoji=' + (emojiEnabled ? 'true' : 'false')
             + '&list=false'
             + '&xudp=' + (xudpEnabled ? 'true' : 'false')
             + '&udp=' + (udpEnabled ? 'true' : 'false')
-            + '&tfo=false'
-            + '&expand=true'
-            + '&scv=false'
-            + '&fdn=false'
-            + '&new_name=true';
+            + '&tfo=' + (tfoEnabled ? 'true' : 'false')
+            + '&expand=' + (expandEnabled ? 'true' : 'false')
+            + '&scv=' + (scvEnabled ? 'true' : 'false')
+            + '&fdn=' + (fdnEnabled ? 'true' : 'false')
+            + '&new_name=' + (newNameEnabled ? 'true' : 'false');
         }
 
         urlElement.textContent = finalUrl;
@@ -1426,15 +1486,15 @@ function generateHomePage(scuValue) {
         + '?target=' + clientType
         + '&url=' + encodedUrl
         + '&insert=false'
-        + '&emoji=true'
+        + '&emoji=' + (emojiEnabled ? 'true' : 'false')
         + '&list=false'
         + '&xudp=' + (xudpEnabled ? 'true' : 'false')
         + '&udp=' + (udpEnabled ? 'true' : 'false')
-        + '&tfo=false'
-        + '&expand=true'
-        + '&scv=false'
-        + '&fdn=false'
-        + '&new_name=true';
+        + '&tfo=' + (tfoEnabled ? 'true' : 'false')
+        + '&expand=' + (expandEnabled ? 'true' : 'false')
+        + '&scv=' + (scvEnabled ? 'true' : 'false')
+        + '&fdn=' + (fdnEnabled ? 'true' : 'false')
+        + '&new_name=' + (newNameEnabled ? 'true' : 'false');
 
       urlElement.textContent = finalUrl;
       urlElement.style.display = 'block';
