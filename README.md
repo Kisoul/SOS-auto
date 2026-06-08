@@ -60,6 +60,7 @@ https://your-worker.workers.dev/{UUID}/sub?domain=your-domain.com&epd=yes&epi=ye
 - `ipv4/ipv6` - IP版本选择（默认都开启）
 - `ispMobile/ispUnicom/ispTelecom` - 运营商筛选（默认都开启）
 - `target` - 输出格式（base64/clash/surge/quantumult）
+- `GitHub优选URL` - 可输入优选ip的网站，例如：https://ip.164746.xyz/ipTop10.html
 
 ## 注意事项
 
