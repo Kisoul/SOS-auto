@@ -1198,6 +1198,22 @@ function generateHomePage(scuValue) {
         </div>
         <div class="switch" id="switchTLS"></div>
       </div>
+
+      <div class="list-item" onclick="toggleSwitch('switchXUDP')">
+        <div>
+          <div class="list-item-label">XUDP</div>
+          <div class="list-item-description">启用后订阅转换链接使用 xudp=true，关闭则使用 xudp=false</div>
+        </div>
+        <div class="switch active" id="switchXUDP"></div>
+      </div>
+
+      <div class="list-item" onclick="toggleSwitch('switchUDP')">
+        <div>
+          <div class="list-item-label">UDP</div>
+          <div class="list-item-description">启用后订阅转换链接使用 udp=true，关闭则使用 udp=false</div>
+        </div>
+        <div class="switch active" id="switchUDP"></div>
+      </div>
     </div>
 
     <div class="footer">
@@ -1213,7 +1229,9 @@ function generateHomePage(scuValue) {
       switchVL: true,
       switchTJ: false,
       switchVM: false,
-      switchTLS: false
+      switchTLS: false,
+      switchXUDP: true,
+      switchUDP: true
     };
 
     const SUB_CONVERTER_URL = "${realScu}";
@@ -1291,6 +1309,8 @@ function generateHomePage(scuValue) {
       const ispMobile = document.getElementById('ispMobile').checked;
       const ispUnicom = document.getElementById('ispUnicom').checked;
       const ispTelecom = document.getElementById('ispTelecom').checked;
+      const xudpEnabled = switches.switchXUDP;
+      const udpEnabled = switches.switchUDP;
 
       const currentUrl = new URL(window.location.href);
       const baseUrl = currentUrl.origin;
@@ -1372,8 +1392,8 @@ function generateHomePage(scuValue) {
             + '&insert=false'
             + '&emoji=true'
             + '&list=false'
-            + '&xudp=true'
-            + '&udp=true'
+            + '&xudp=' + (xudpEnabled ? 'true' : 'false')
+            + '&udp=' + (udpEnabled ? 'true' : 'false')
             + '&tfo=false'
             + '&expand=true'
             + '&scv=false'
@@ -1408,8 +1428,8 @@ function generateHomePage(scuValue) {
         + '&insert=false'
         + '&emoji=true'
         + '&list=false'
-        + '&xudp=true'
-        + '&udp=true'
+        + '&xudp=' + (xudpEnabled ? 'true' : 'false')
+        + '&udp=' + (udpEnabled ? 'true' : 'false')
         + '&tfo=false'
         + '&expand=true'
         + '&scv=false'
