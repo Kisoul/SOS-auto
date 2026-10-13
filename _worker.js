@@ -762,7 +762,7 @@ function generateSingBoxConfig(links, params) {
     else node.uuid = credential;
     if (type === 'vmess') { node.security = 'auto'; node.alter_id = 0; }
     if (!enabled('udp')) node.network = 'tcp';
-    if (type === 'vless') node.packet_encoding = enabled('xudp') ? 'xudp' : '';
+    if (type === 'vless') node.packet_encoding = enabled('udp') && enabled('xudp') ? 'xudp' : '';
     if (tls) {
       node.tls = { enabled: true, server_name: sni || host || server,
         insecure: enabled('scv', false) };
@@ -961,13 +961,14 @@ async function handleSubscriptionRequest(request, user, customDomain, piu, ipv4E
   const wsPath = customPath || '/';
 
   async function addNodesFromList(list) {
-    const hasProtocol = evEnabled || etEnabled || vmEnabled;
-    const useVL = hasProtocol ? evEnabled : true;
+    const useVL = evEnabled;
 
     if (useVL) finalLinks.push(...generateLinksFromSource(list, user, nodeDomain, disableNonTLS, wsPath, customPorts));
     if (etEnabled) finalLinks.push(...await generateTrojanLinksFromSource(list, user, nodeDomain, disableNonTLS, wsPath, customPorts));
     if (vmEnabled) finalLinks.push(...generateVMessLinksFromSource(list, user, nodeDomain, disableNonTLS, wsPath, customPorts));
   }
+
+  if (!evEnabled && !etEnabled && !vmEnabled) return new Response('请至少选择一个协议', { status: 400 });
 
   await addNodesFromList([{ ip: workerDomain, isp: '原生地址' }]);
 
@@ -1028,8 +1029,7 @@ async function handleSubscriptionRequest(request, user, customDomain, piu, ipv4E
 
   if (finalLinks.length === 0) {
     if (ech) return new Response('ECH 已开启，但所选端口没有 TLS 节点', { status: 400 });
-    const errorRemark = '所有节点获取失败';
-    finalLinks.push('vless://00000000-0000-0000-0000-000000000000@127.0.0.1:80?encryption=none&security=none&type=ws&host=error.com&path=%2F#' + encodeURIComponent(errorRemark));
+    return new Response('没有可用节点，请检查协议、端口及仅 TLS 设置', { status: 400 });
   }
 
   let subscriptionContent;
@@ -1369,16 +1369,47 @@ function generateHomePage(scuValue) {
         color: #5ac8fa !important;
       }
     }
+    :root { --accent:#2563eb; --ink:#17243b; --muted:#64748b; --panel:#fff; --field:#f3f6fb; --line:#e5ebf3; }
+    body { background:radial-gradient(ellipse at top left,#e6f1ff 0,transparent 48%),#f5f7fb; color:var(--ink); }
+    .container { max-width:780px; padding:24px 20px; }
+    .header { text-align:left; padding:28px 4px 32px; }
+    .header h1 { font-size:34px; letter-spacing:-1px; color:var(--ink); }
+    .header p { color:var(--muted); line-height:1.7; }
+    .eyebrow { color:var(--accent); font-size:12px; font-weight:700; letter-spacing:2px; margin-bottom:12px; }
+    .card { background:var(--panel); border:1px solid var(--line); box-shadow:0 12px 40px rgba(28,54,90,.05); border-radius:24px; padding:28px; }
+    .section-title { display:flex; align-items:center; gap:10px; margin:24px 0 16px; padding-top:20px; border-top:1px solid var(--line); font-size:17px; font-weight:650; color:var(--ink); }
+    .section-title:first-child { margin-top:0; padding-top:0; border:0; }
+    .section-title span { display:grid; place-items:center; width:26px; height:26px; border-radius:8px; background:#eaf1ff; color:var(--accent); font-size:12px; }
+    .form-group label { color:var(--ink); font-size:14px; font-weight:600; }
+    .form-group input,.form-group select,.form-group textarea { background:var(--field); border:1px solid var(--line); border-radius:12px; color:var(--ink); font-size:15px; }
+    .form-group input:focus,.form-group select:focus,.form-group textarea:focus { outline:2px solid #bfdbfe; border-color:var(--accent); }
+    .form-group small,.list-item-description { color:var(--muted); line-height:1.6; }
+    .list-item { gap:20px; border-color:var(--line); }
+    .list-item-label { color:var(--ink); font-size:15px; font-weight:550; }
+    .list-item:active { margin:0; padding:16px 0; }
+    .switch.active { background:var(--accent); }
+    .switch:focus-visible { outline:3px solid #93c5fd; outline-offset:4px; }
+    .list-item.is-disabled { opacity:.48; cursor:not-allowed; }
+    .option-reason { color:var(--muted); font-size:12px; margin-top:5px; line-height:1.5; }
+    .form-group input:disabled,.form-group select:disabled { opacity:.5; cursor:not-allowed; }
+    .client-btn { background:#eff5ff; color:var(--accent); border-color:#d8e5ff; border-radius:12px; min-height:44px; }
+    .client-btn:hover,.client-btn.selected { color:white!important; background:var(--accent)!important; border-color:var(--accent)!important; }
+    .result-url { background:#edf8f5; color:#146b52; border:1px solid #cce9df; padding:16px; line-height:1.6; }
+    .context-note { background:var(--field); border:1px solid var(--line); border-radius:12px; padding:12px 14px; color:var(--muted); font-size:13px; line-height:1.6; margin:12px 0; }
+    @media(max-width:520px) { .container { padding:12px; } .card { padding:20px; } .header h1 { font-size:28px; } .header { padding:20px 6px; } }
+    @media(prefers-color-scheme:dark) { :root { --ink:#e5edf9; --muted:#9cabc0; --panel:#172237; --field:#202e45; --line:#2c3b53; } body { background:radial-gradient(ellipse at top left,#1a345a 0,transparent 48%),#101a2b; } .section-title span { background:#243c60; } .result-url { background:#163b35; color:#93ddc4; border-color:#27554a; } }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="header">
-      <h1>服务器优选工具</h1>
-      <p>智能优选 • 一键生成</p>
+      <div class="eyebrow">SOS · SUBSCRIPTION STUDIO</div>
+      <h1>连接，从这里开始</h1>
+      <p>选择节点来源与分流方案，为你的客户端生成订阅。</p>
     </div>
 
     <div class="card">
+      <div class="section-title"><span>01</span>连接信息</div>
       <div class="form-group">
         <label>域名</label>
         <input type="text" id="domain" placeholder="请输入您的域名">
@@ -1397,10 +1428,11 @@ function generateHomePage(scuValue) {
 
       <div class="form-group">
         <label>自定义端口（可选）</label>
-        <input type="text" id="customPorts" placeholder="留空则使用443端口">
-        <small>支持英文逗号分隔；例如：TLS端口：443,2053,2083,2087,2096,8443非TLS端口：80,8080,8880,2052,2082,2086,2095</small>
+        <input type="text" id="customPorts" placeholder="例如：443,2053" oninput="syncOptionState()">
+        <small>留空按来源端口生成；无来源端口时生成 443 和 80。开启仅 TLS 后过滤已知非 TLS 端口。</small>
       </div>
 
+      <div class="section-title"><span>02</span>节点来源</div>
       <div class="list-item" onclick="toggleSwitch('switchDomain')">
         <div><div class="list-item-label">启用优选域名</div></div>
         <div class="switch active" id="switchDomain"></div>
@@ -1423,7 +1455,7 @@ function generateHomePage(scuValue) {
       </div>
 
       <div class="form-group" id="clashConfigModeGroup" style="margin-top:12px;">
-        <label>Clash 配置方式</label>
+        <label>分组与分流模板（Clash / sing-box）</label>
         <select id="clashConfigMode">
           <option value="default">默认配置</option>
           <option value="acl_default">内置：ACL4SSR 默认版</option>
@@ -1432,7 +1464,7 @@ function generateHomePage(scuValue) {
           <option value="acl_Kisoul">内置：ACL4SSR Kisoul</option>
           <option value="custom">自定义远程配置文件</option>
         </select>
-        <small>默认配置走 worker 原生方案；内置 / 自定义会交给订阅转换器处理</small>
+        <small>sing-box 原生读取所选模板；Clash 的远程模板交给订阅转换器。</small>
       </div>
 
       <div class="form-group" id="customClashConfigGroup" style="display:none; margin-top:12px;">
@@ -1442,7 +1474,7 @@ function generateHomePage(scuValue) {
       </div>
 
       <div class="form-group" style="margin-top:24px;">
-        <label>协议选择</label>
+        <div class="section-title"><span>03</span>节点协议</div>
         <div style="margin-top:8px;">
           <div class="list-item" onclick="toggleSwitch('switchVL')">
             <div><div class="list-item-label">VLESS (vl)</div></div>
@@ -1461,6 +1493,7 @@ function generateHomePage(scuValue) {
 
       <div class="form-group" style="margin-top:24px;">
         <label>客户端选择</label>
+        <div class="context-note" id="clientScopeNote">点击客户端生成订阅。下方选项会显示该客户端的支持范围。</div>
         <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; margin-top:8px;">
           <button type="button" class="client-btn" onclick="generateClientLink('clash', 'CLASH')">CLASH</button>
           <button type="button" class="client-btn" onclick="generateClientLink('clash', 'STASH')">STASH</button>
@@ -1478,7 +1511,8 @@ function generateHomePage(scuValue) {
       </div>
 
       <div class="form-group">
-        <label>IP版本选择</label>
+        <div class="section-title"><span>04</span>动态优选筛选</div>
+        <label>IP 版本（仅筛选动态优选来源）</label>
         <div style="display:flex; gap:16px; margin-top:8px; flex-wrap:wrap;">
           <label class="checkbox-label">
             <input type="checkbox" id="ipv4Enabled" checked>
@@ -1492,7 +1526,7 @@ function generateHomePage(scuValue) {
       </div>
 
       <div class="form-group">
-        <label>运营商选择</label>
+        <label>运营商（仅筛选动态优选来源）</label>
         <div style="display:flex; gap:16px; flex-wrap:wrap; margin-top:8px;">
           <label class="checkbox-label">
             <input type="checkbox" id="ispMobile" checked>
@@ -1509,6 +1543,7 @@ function generateHomePage(scuValue) {
         </div>
       </div>
 
+      <div class="section-title"><span>05</span>连接选项</div>
       <div class="list-item" onclick="toggleSwitch('switchTLS')" style="margin-top:8px;">
         <div>
           <div class="list-item-label">仅TLS节点</div>
@@ -1629,16 +1664,87 @@ function generateHomePage(scuValue) {
     const SUB_CONVERTER_URL = "${realScu}";
     const PRESET_CONFIG_MAP = ${JSON.stringify(presetClashConfigMap)};
 
+    let activeClient = '';
+    let tlsBeforeECH = false;
+    const disabledSwitches = new Set();
+
+    function syncOptionState() {
+      if (!document.querySelectorAll) return;
+      disabledSwitches.clear();
+      function availability(id, reason) {
+        const element = document.getElementById(id);
+        if (!element) return;
+        const row = element.closest('.list-item');
+        row.classList.toggle('is-disabled', !!reason);
+        element.setAttribute('aria-disabled', reason ? 'true' : 'false');
+        let note = row.querySelector('.option-reason');
+        if (!note) { note = document.createElement('div'); note.className = 'option-reason'; row.firstElementChild.appendChild(note); }
+        note.textContent = reason || '';
+        note.hidden = !reason;
+        if (reason) disabledSwitches.add(id);
+      }
+      Object.keys(switches).forEach(function (id) {
+        const element = document.getElementById(id);
+        element.classList.toggle('active', switches[id]);
+        element.setAttribute('aria-checked', String(switches[id]));
+        availability(id, '');
+      });
+      const mode = document.getElementById('clashConfigMode').value;
+      const converter = activeClient && activeClient !== 'sing-box' && activeClient !== 'v2ray'
+        && (activeClient !== 'clash' || mode !== 'default');
+      if (switches.switchECH) availability('switchTLS', 'ECH 已开启，必须保留 TLS');
+      if (!switches.switchUDP || !switches.switchVL) availability('switchXUDP', '仅在 UDP 和 VLESS 都开启时生效');
+      if (activeClient && activeClient !== 'sing-box' && !converter) {
+        ['switchUDP','switchXUDP','switchTFO','switchSCV'].forEach(function (id) {
+          availability(id, '当前原生或原始订阅未应用此选项');
+        });
+      }
+      if (activeClient && !converter) {
+        ['switchEmoji','switchExpand','switchNewName','switchFDN'].forEach(function (id) {
+          availability(id, activeClient === 'sing-box' && id === 'switchExpand'
+            ? 'sing-box 模板规则始终内嵌' : '仅订阅转换器使用此选项');
+        });
+      }
+      ['githubUrl'].forEach(function (id) { document.getElementById(id).disabled = !switches.switchGitHub; });
+      const source = document.getElementById('ipSource');
+      source.disabled = !switches.switchIP;
+      document.getElementById('dynamicIPUrl').disabled = !switches.switchIP || source.value === 'wetest';
+      document.getElementById('ipFallback').disabled = !switches.switchIP || source.value === 'wetest';
+      ['ipv4Enabled','ipv6Enabled','ispMobile','ispUnicom','ispTelecom'].forEach(function (id) {
+        document.getElementById(id).disabled = !switches.switchIP;
+      });
+      ['customECHDomain','customDNS'].forEach(function (id) { document.getElementById(id).disabled = !switches.switchECH; });
+      document.getElementById('clashConfigMode').disabled = activeClient === 'v2ray';
+      document.getElementById('clashConfigUrl').disabled = activeClient === 'v2ray';
+      document.getElementById('clientScopeNote').textContent = !activeClient ? '点击客户端生成订阅。下方选项会显示该客户端的支持范围。'
+        : activeClient === 'sing-box' ? 'sing-box：原生 JSON，支持分组模板和连接选项；转换器专属选项不生效。'
+        : activeClient === 'v2ray' ? '原始节点订阅：不应用分组模板及转换器选项。'
+        : converter ? '当前使用订阅转换器；选项是否生效取决于转换器与客户端支持。' : '当前使用原生基础配置；转换器专属选项不生效。';
+      document.querySelectorAll('.client-btn').forEach(function (button) {
+        button.classList.toggle('selected', !!activeClient && button.getAttribute('onclick').includes("'" + activeClient + "'"));
+      });
+    }
+
     function toggleSwitch(id) {
-      const switchEl = document.getElementById(id);
+      if (disabledSwitches.has(id)) return;
+      if (['switchVL','switchTJ','switchVM'].includes(id) && switches[id]
+        && ['switchVL','switchTJ','switchVM'].filter(function (key) { return switches[key]; }).length === 1) {
+        alert('请至少保留一个节点协议'); return;
+      }
       switches[id] = !switches[id];
-      switchEl.classList.toggle('active');
+      if (id === 'switchECH') {
+        if (switches.switchECH) { tlsBeforeECH = switches.switchTLS; switches.switchTLS = true; }
+        else switches.switchTLS = tlsBeforeECH;
+      }
+      if (id === 'switchUDP' && !switches.switchUDP) switches.switchXUDP = false;
+      syncOptionState();
     }
 
     function toggleClashConfigInput() {
       const mode = document.getElementById('clashConfigMode').value;
       const customGroup = document.getElementById('customClashConfigGroup');
       customGroup.style.display = mode === 'custom' ? 'block' : 'none';
+      syncOptionState();
     }
 
     function tryOpenApp(schemeUrl, fallbackCallback, timeout) {
@@ -1678,6 +1784,8 @@ function generateHomePage(scuValue) {
     }
 
     function generateClientLink(clientType, clientName) {
+      activeClient = clientType;
+      syncOptionState();
       const domain = document.getElementById('domain').value.trim();
       const uuid = document.getElementById('uuid').value.trim();
       const customPath = (document.getElementById('customPath').value || '').trim() || '/';
@@ -1719,7 +1827,7 @@ function generateHomePage(scuValue) {
         + '&egi=' + (switches.switchGitHub ? 'yes' : 'no');
 
       if (githubUrl) subscriptionUrl += '&piu=' + encodeURIComponent(githubUrl);
-      if (switches.switchVL) subscriptionUrl += '&ev=yes';
+      subscriptionUrl += '&ev=' + (switches.switchVL ? 'yes' : 'no');
       if (switches.switchTJ) subscriptionUrl += '&et=yes';
       if (switches.switchVM) subscriptionUrl += '&mess=yes';
       if (!ipv4Enabled) subscriptionUrl += '&ipv4=no';
@@ -1906,6 +2014,16 @@ function generateHomePage(scuValue) {
         modeSelect.addEventListener('change', toggleClashConfigInput);
         toggleClashConfigInput();
       }
+      document.getElementById('ipSource').addEventListener('change', syncOptionState);
+      document.querySelectorAll('.switch').forEach(function (element) {
+        element.setAttribute('role', 'switch');
+        element.setAttribute('aria-label', element.closest('.list-item').querySelector('.list-item-label')?.textContent || element.id);
+        element.setAttribute('tabindex', '0');
+        element.addEventListener('keydown', function (event) {
+          if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); toggleSwitch(element.id); }
+        });
+      });
+      syncOptionState();
     });
   </script>
 </body>
