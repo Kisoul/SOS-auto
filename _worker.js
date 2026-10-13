@@ -1396,6 +1396,32 @@ function generateHomePage(scuValue) {
     .client-btn:hover,.client-btn.selected { color:white!important; background:var(--accent)!important; border-color:var(--accent)!important; }
     .result-url { background:#edf8f5; color:#146b52; border:1px solid #cce9df; padding:16px; line-height:1.6; }
     .context-note { background:var(--field); border:1px solid var(--line); border-radius:12px; padding:12px 14px; color:var(--muted); font-size:13px; line-height:1.6; margin:12px 0; }
+    .card { padding:0; overflow:hidden; }
+    .settings-section { padding:26px 28px; border-bottom:1px solid var(--line); }
+    .settings-section:last-child { border-bottom:0; }
+    .settings-section h2 { margin:0 0 6px; font-size:18px; color:var(--ink); }
+    .section-caption { margin:0 0 20px; font-size:13px; color:var(--muted); line-height:1.7; }
+    .settings-section .form-group { margin-bottom:18px; }
+    .settings-section .form-group:last-child { margin-bottom:0; }
+    .settings-section .form-group>label { display:block; margin-bottom:8px; text-transform:none; letter-spacing:0; }
+    .settings-section .list-item { padding:14px 0; }
+    .linked-panel { padding:18px; margin:14px 0; background:var(--field); border:1px solid var(--line); border-radius:14px; }
+    .linked-panel .form-group input,.linked-panel select { background:var(--panel); }
+    .linked-panel input+label { margin-top:16px; }
+    .linked-panel .checkbox-label { display:flex; font-size:13px; gap:9px; padding:10px 0 0; }
+    .linked-panel .checkbox-label input { width:18px; height:18px; }
+    .advanced-field { margin:14px 0 8px; }
+    .advanced-field summary { color:var(--muted); font-size:13px; cursor:pointer; padding:5px 0; }
+    .advanced-field input { margin-top:10px; }
+    .state-badge { display:inline-flex; align-items:center; gap:6px; padding:5px 9px; border-radius:7px; background:#e9f3ff; color:var(--accent); font-size:12px; font-weight:600; margin-top:8px; }
+    .state-badge:empty { display:none; }
+    .generate-button { width:100%; padding:15px 20px; border:0; border-radius:12px; color:white; background:var(--accent); font-size:16px; font-weight:650; cursor:pointer; margin:12px 0 0; }
+    .generate-button:hover { background:#1d4ed8; }
+    .converter-panel { margin-top:22px; }
+    .converter-panel>summary { font-size:14px; color:var(--muted); cursor:pointer; padding:12px 0; }
+    .source-note { font-size:12px; color:var(--muted); margin-top:10px; line-height:1.6; }
+    [hidden] { display:none!important; }
+    @media(max-width:520px) { .card { padding:0; } .settings-section { padding:22px 20px; } .linked-panel { padding:15px; } }
     @media(max-width:520px) { .container { padding:12px; } .card { padding:20px; } .header h1 { font-size:28px; } .header { padding:20px 6px; } }
     @media(prefers-color-scheme:dark) { :root { --ink:#e5edf9; --muted:#9cabc0; --panel:#172237; --field:#202e45; --line:#2c3b53; } body { background:radial-gradient(ellipse at top left,#1a345a 0,transparent 48%),#101a2b; } .section-title span { background:#243c60; } .result-url { background:#163b35; color:#93ddc4; border-color:#27554a; } }
   </style>
@@ -1493,6 +1519,12 @@ function generateHomePage(scuValue) {
 
       <div class="form-group" style="margin-top:24px;">
         <label>客户端选择</label>
+        <select id="clientProfile" onchange="selectClientProfile()">
+          <option value="sing-box">SING-BOX</option><option value="clash">CLASH</option><option value="stash">STASH</option>
+          <option value="surge">SURGE</option><option value="loon">LOON</option><option value="quanx">QUANTUMULT X</option>
+          <option value="v2ray">V2RAY</option><option value="v2rayng">V2RAYNG</option><option value="nekoray">NEKORAY</option><option value="shadowrocket">Shadowrocket</option>
+        </select>
+        <button type="button" class="generate-button" id="generateSubscription" onclick="generateSelectedClient()">生成 SING-BOX 订阅</button>
         <div class="context-note" id="clientScopeNote">点击客户端生成订阅。下方选项会显示该客户端的支持范围。</div>
         <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; margin-top:8px;">
           <button type="button" class="client-btn" onclick="generateClientLink('clash', 'CLASH')">CLASH</button>
@@ -1555,7 +1587,7 @@ function generateHomePage(scuValue) {
       <div class="form-group">
         <label>动态优选 IP 来源</label>
         <select id="ipSource"><option value="uouin">api.uouin.com（默认）</option><option value="wetest">wetest（原来源）</option></select>
-        <input type="text" id="dynamicIPUrl" placeholder="可选：自定义兼容 uouin 的 HTTPS API 地址">
+        <details class="advanced-field" id="customAPIField"><summary>自定义兼容 API 地址（可选）</summary><input type="text" id="dynamicIPUrl" placeholder="https://example.com/api"></details>
         <label class="checkbox-label"><input type="checkbox" id="ipFallback" checked><span>新 API 失败时回退 wetest</span></label>
       </div>
 
@@ -1668,6 +1700,62 @@ function generateHomePage(scuValue) {
     let tlsBeforeECH = false;
     const disabledSwitches = new Set();
 
+    const clientProfiles = {
+      'sing-box': ['sing-box', 'SING-BOX'], clash: ['clash', 'CLASH'], stash: ['clash', 'STASH'],
+      surge: ['surge', 'SURGE'], loon: ['loon', 'LOON'], quanx: ['quanx', 'QUANTUMULT X'],
+      v2ray: ['v2ray', 'V2RAY'], v2rayng: ['v2ray', 'V2RAYNG'], nekoray: ['v2ray', 'NEKORAY'], shadowrocket: ['v2ray', 'Shadowrocket']
+    };
+    function selectClientProfile() {
+      const profile = clientProfiles[document.getElementById('clientProfile').value] || clientProfiles['sing-box'];
+      activeClient = profile[0];
+      document.getElementById('generateSubscription').textContent = '生成 ' + profile[1] + ' 订阅';
+      syncOptionState();
+    }
+    function generateSelectedClient() {
+      const profile = clientProfiles[document.getElementById('clientProfile').value] || clientProfiles['sing-box'];
+      generateClientLink(profile[0], profile[1]);
+    }
+    function arrangeSettings() {
+      if (!document.querySelector) return;
+      const card = document.querySelector('.card');
+      document.querySelectorAll('.section-title').forEach(function (heading) { heading.remove(); });
+      const field = function (id) { return document.getElementById(id).closest('.form-group'); };
+      const row = function (id) { return document.getElementById(id).closest('.list-item'); };
+      const connection = ['domain','uuid','customPath','customPorts'].map(field);
+      const sources = ['switchDomain','switchIP','switchGitHub'].map(row);
+      const dynamic = field('ipSource'), versions = field('ipv4Enabled'), carriers = field('ispMobile');
+      const ech = field('customECHDomain');
+      const protocol = field('switchVL');
+      const client = field('clientProfile');
+      document.querySelector('.client-btn').parentElement.hidden = true;
+      const oldNote = client.querySelector('p'); if (oldNote) oldNote.remove();
+      dynamic.classList.add('linked-panel'); dynamic.id = 'dynamicSourcePanel';
+      dynamic.appendChild(versions); dynamic.appendChild(carriers);
+      const sourceCaption = document.createElement('div'); sourceCaption.className = 'source-note';
+      sourceCaption.textContent = '这些筛选仅影响动态优选 IP。原生地址、优选域名与自定义列表不受影响。';
+      dynamic.appendChild(sourceCaption);
+      ech.classList.add('linked-panel'); ech.id = 'echOptionsPanel';
+      const echBadge = document.createElement('div'); echBadge.className = 'state-badge'; echBadge.id = 'echStateBadge'; row('switchECH').firstElementChild.appendChild(echBadge);
+      const sourceBadge = document.createElement('div'); sourceBadge.className = 'state-badge'; sourceBadge.id = 'ipStateBadge'; row('switchIP').firstElementChild.appendChild(sourceBadge);
+      const converter = document.createElement('details'); converter.className = 'converter-panel'; converter.id = 'converterOptionsPanel';
+      converter.innerHTML = '<summary>订阅转换器选项</summary><p class="source-note">仅在使用订阅转换器时生效。</p>';
+      ['switchEmoji','switchExpand','switchNewName','switchFDN'].forEach(function (id) { converter.appendChild(row(id)); });
+      const sections = [
+        ['连接信息','填写代理域名与身份信息，端口和路径可按需调整。',connection],
+        ['节点来源','可组合多个来源；原生地址始终保留。',[...sources,field('githubUrl'),dynamic]],
+        ['协议与连接','选择至少一种协议，再配置加密与传输选项。',[protocol,row('switchECH'),ech,row('switchTLS'),row('switchUDP'),row('switchXUDP'),row('switchTFO'),row('switchSCV')]],
+        ['分组与分流','从远程模板读取策略；默认模式使用基础分组。',[field('clashConfigMode'),field('clashConfigUrl')]],
+        ['生成订阅','先选客户端，选项会同步显示对应的支持范围。',[client,converter]]
+      ];
+      sections.forEach(function (definition) {
+        const section = document.createElement('section'); section.className = 'settings-section';
+        const title = document.createElement('h2'); title.textContent = definition[0]; section.appendChild(title);
+        const caption = document.createElement('p'); caption.className = 'section-caption'; caption.textContent = definition[1]; section.appendChild(caption);
+        definition[2].forEach(function (element) { element.style.marginTop = ''; section.appendChild(element); });
+        card.appendChild(section);
+      });
+    }
+
     function syncOptionState() {
       if (!document.querySelectorAll) return;
       disabledSwitches.clear();
@@ -1716,6 +1804,16 @@ function generateHomePage(scuValue) {
       ['customECHDomain','customDNS'].forEach(function (id) { document.getElementById(id).disabled = !switches.switchECH; });
       document.getElementById('clashConfigMode').disabled = activeClient === 'v2ray';
       document.getElementById('clashConfigUrl').disabled = activeClient === 'v2ray';
+      const echPanel = document.getElementById('echOptionsPanel'); if (echPanel) echPanel.hidden = !switches.switchECH;
+      const dynamicPanel = document.getElementById('dynamicSourcePanel'); if (dynamicPanel) dynamicPanel.hidden = !switches.switchIP;
+      const customAPI = document.getElementById('customAPIField'); if (customAPI) customAPI.hidden = !switches.switchIP || source.value === 'wetest';
+      const fallbackRow = document.getElementById('ipFallback').closest('label'); if (fallbackRow) fallbackRow.hidden = source.value === 'wetest';
+      const echBadge = document.getElementById('echStateBadge'); if (echBadge) echBadge.textContent = switches.switchECH ? '已联动 · 仅 TLS 节点' : '';
+      const ipBadge = document.getElementById('ipStateBadge'); if (ipBadge) ipBadge.textContent = switches.switchIP ? source.value === 'wetest' ? '来源 · wetest' : '来源 · uouin API' : '';
+      const ports = document.getElementById('customPorts').value.trim();
+      const onlyHTTP = ports && ports.split(',').every(function (port) { return [80,8080,8880,2052,2082,2086,2095].includes(Number(port.trim())); });
+      if (onlyHTTP && !switches.switchTLS && !switches.switchECH) availability('switchSCV', '当前端口仅生成非 TLS 节点，无证书校验');
+      const converterPanel = document.getElementById('converterOptionsPanel'); if (converterPanel) converterPanel.hidden = !converter;
       document.getElementById('clientScopeNote').textContent = !activeClient ? '点击客户端生成订阅。下方选项会显示该客户端的支持范围。'
         : activeClient === 'sing-box' ? 'sing-box：原生 JSON，支持分组模板和连接选项；转换器专属选项不生效。'
         : activeClient === 'v2ray' ? '原始节点订阅：不应用分组模板及转换器选项。'
@@ -1736,7 +1834,7 @@ function generateHomePage(scuValue) {
         if (switches.switchECH) { tlsBeforeECH = switches.switchTLS; switches.switchTLS = true; }
         else switches.switchTLS = tlsBeforeECH;
       }
-      if (id === 'switchUDP' && !switches.switchUDP) switches.switchXUDP = false;
+      if (!switches.switchUDP || !switches.switchVL) switches.switchXUDP = false;
       syncOptionState();
     }
 
@@ -1790,6 +1888,12 @@ function generateHomePage(scuValue) {
       const uuid = document.getElementById('uuid').value.trim();
       const customPath = (document.getElementById('customPath').value || '').trim() || '/';
       const customPortsRaw = ((document.getElementById('customPorts') || {}).value || '').trim();
+      if (customPortsRaw && customPortsRaw.split(',').some(function (port) { return !/^\\d+$/.test(port.trim()) || Number(port.trim()) < 1 || Number(port.trim()) > 65535; })) {
+        alert('端口需为 1–65535 的整数，多个端口用英文逗号分隔'); return;
+      }
+      if ((switches.switchECH || switches.switchTLS) && customPortsRaw && customPortsRaw.split(',').every(function (port) { return [80,8080,8880,2052,2082,2086,2095].includes(Number(port.trim())); })) {
+        alert('ECH / 仅 TLS 已开启，请保留至少一个 TLS 端口，例如 443'); return;
+      }
       const githubUrl = document.getElementById('githubUrl').value.trim();
       const clashConfigMode = (document.getElementById('clashConfigMode') || {}).value || 'default';
       const clashConfigUrlInput = ((document.getElementById('clashConfigUrl') || {}).value || '').trim();
@@ -2009,6 +2113,7 @@ function generateHomePage(scuValue) {
     }
 
     document.addEventListener('DOMContentLoaded', function () {
+      arrangeSettings();
       const modeSelect = document.getElementById('clashConfigMode');
       if (modeSelect) {
         modeSelect.addEventListener('change', toggleClashConfigInput);
@@ -2023,7 +2128,7 @@ function generateHomePage(scuValue) {
           if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); toggleSwitch(element.id); }
         });
       });
-      syncOptionState();
+      selectClientProfile();
     });
   </script>
 </body>
