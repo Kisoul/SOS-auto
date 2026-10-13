@@ -71,9 +71,6 @@ https://your-worker.workers.dev/{UUID}/sub?domain=your-domain.com&epd=yes&epi=ye
 
 ## 注意事项
 
-- CLASH 选择远程模板且开启 ECH 时，生成 Worker 的 `target=clash&ech=yes&config=...` 链接。Worker 仍调用 `scu` 转换器生成模板分组和规则，再使用内嵌 js-yaml 4.1.1 解析 YAML、匹配 TLS 节点补入 `ech-opts`，并为 ECH 查询域名补入自定义 DoH 的 nameserver-policy。无需额外安装依赖，复制单个 `_worker.js` 即可部署。
-- 仅匹配本次来源的节点类型、地址、端口、UUID/Password，不为转换器插入的其他节点启用 ECH。转换器请求超时 20 秒；HTTP 错误、无效 YAML 或无匹配 TLS 节点会返回明确的 502 错误，不返回悄悄丢失 ECH 的配置。
-- ECH 关闭的 Clash、STASH、其他客户端及 sing-box 继续使用原来的路径。旧的直接指向转换器的 Clash 链接不会被修复，需要重新生成链接。Clash ECH 需要支持该字段的 Mihomo 内核；配置有字段不等于握手成功，查询 DoH 也必须能从客户端网络访问。
 
 - 界面按连接信息、来源、协议、动态筛选和连接选项分区，支持窄屏和深色模式；开关可用键盘空格/回车操作。
 - 界面将来源、动态 IP 筛选与失败回退放在同一面板；关闭来源收起其配置，切换 wetest 隐藏不适用的 API/回退输入。ECH 开启时显示查询域名/DoH 和联动状态，关闭时收起。客户端使用下拉选择和单个生成按钮，选择时立即更新选项支持范围，转换器选项单独折叠。启用 ECH/仅 TLS 时如只填写 HTTP 端口，生成前提示冲突；非法端口也会提示。
