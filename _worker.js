@@ -61,7 +61,7 @@ function isValidUUID(str) {
 }
 
 // 获取动态IP列表（支持IPv4/IPv6和运营商筛选）
-async function fetchDynamicIPs(ipv4Enabled = true, ipv6Enabled = true, ispMobile = true, ispUnicom = true, ispTelecom = true) {
+async function fetchWetestIPs(ipv4Enabled = true, ipv6Enabled = true, ispMobile = true, ispUnicom = true, ispTelecom = true) {
   const v4Url = 'https://www.wetest.vip/page/cloudflare/address_v4.html';
   const v6Url = 'https://www.wetest.vip/page/cloudflare/address_v6.html';
   let results = [];
@@ -90,10 +90,73 @@ async function fetchDynamicIPs(ipv4Enabled = true, ipv6Enabled = true, ispMobile
   }
 }
 
+// 新动态 IP API 沿用上游签名协议；地址可覆盖，失败时保留 wetest 回退。
+async function md5Hex(value) {
+  const digest = await crypto.subtle.digest('MD5', new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function fetchDynamicIPs(ipv4Enabled, ipv6Enabled, ispMobile, ispUnicom, ispTelecom, params = new URLSearchParams()) {
+  const options = [ipv4Enabled, ipv6Enabled, ispMobile, ispUnicom, ispTelecom];
+  if (params.get('ipSource') === 'wetest') return fetchWetestIPs(...options);
+  if (!ipv4Enabled && !ipv6Enabled) return [];
+  try {
+    const address = new URL(params.get('dynamicIPUrl') || 'https://api.uouin.com/index.php/index/Cloudflare');
+    if (address.protocol !== 'https:') throw new Error('动态 IP API 必须使用 HTTPS');
+    const time = String(Date.now());
+    const inner = await md5Hex(atob('RGRsVHh0TjBzVU91'));
+    address.searchParams.set('key', await md5Hex(inner + atob('NzBjbG91ZGZsYXJlYXBpa2V5') + time));
+    address.searchParams.set('time', time);
+    const response = await fetch(address.toString(), { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(5000) });
+    if (!response.ok) throw new Error('动态 IP API HTTP ' + response.status);
+    const data = await response.json();
+    if (!data.data || typeof data.data !== 'object') throw new Error('动态 IP API 格式无效');
+    const groups = { ctcc: ['电信', ispTelecom], cucc: ['联通', ispUnicom], cmcc: ['移动', ispMobile],
+      bgp: ['多线', ispMobile || ispUnicom || ispTelecom], ipv6: ['IPv6', ispMobile || ispUnicom || ispTelecom] };
+    const results = [], seen = new Set();
+    for (const [key, [isp, include]] of Object.entries(groups)) {
+      if (!include || (key === 'ipv6' ? !ipv6Enabled : !ipv4Enabled)) continue;
+      const entries = data.data[key]?.info;
+      if (!Array.isArray(entries)) continue;
+      for (const entry of entries) {
+        const ip = String(entry?.ip || '').trim().replace(/^\[|\]$/g, '');
+        if (!ip || !/^[0-9a-fA-F:.]+$/.test(ip)) continue;
+        try { new URL('https://' + (ip.includes(':') ? '[' + ip + ']' : ip)); } catch { continue; }
+        if (ip.includes(':') ? !ipv6Enabled : !ipv4Enabled) continue;
+        if (seen.has(ip)) continue;
+        seen.add(ip);
+        results.push({ ip, isp, colo: String(results.length + 1).padStart(2, '0') });
+      }
+    }
+    if (results.length) return results;
+  } catch (error) { console.warn('动态 IP API 失败，将尝试 wetest:', error.message); }
+  return params.get('ipFallback') === 'no' ? [] : fetchWetestIPs(...options);
+}
+
+function getECHOptions(params) {
+  if (params.get('ech') !== 'yes') return null;
+  const domain = params.get('customECHDomain') || 'cloudflare-ech.com';
+  if (!/^(?=.{1,253}$)[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+$/.test(domain)) throw new Error('ECH 查询域名无效');
+  const dns = new URL(params.get('customDNS') || 'https://1.1.1.1/dns-query');
+  if (dns.protocol !== 'https:' || dns.username || dns.password || dns.hash) throw new Error('ECH DNS 必须为不含凭据的 HTTPS DoH 地址');
+  return { domain, dns: dns.toString() };
+}
+
+function addECHToLink(link, ech) {
+  if (link.startsWith('vmess://')) {
+    const data = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(link.slice(8)), c => c.charCodeAt(0))));
+    data.ech = ech.domain + '+' + ech.dns;
+    return 'vmess://' + btoa(Array.from(new TextEncoder().encode(JSON.stringify(data)), byte => String.fromCharCode(byte)).join(''));
+  }
+  const url = new URL(link);
+  url.searchParams.set('ech', ech.domain + '+' + ech.dns);
+  return url.toString();
+}
+
 // 解析 wetest 页面
 async function fetchAndParseWetest(url) {
   try {
-    const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(5000) });
     if (!response.ok) return [];
 
     const html = await response.text();
@@ -608,6 +671,10 @@ function generateClashConfig(links) {
     yaml += '      headers:\n';
     yaml += '        Host: ' + escapeYamlString(host) + '\n';
     if (sni) yaml += '    servername: ' + escapeYamlString(sni) + '\n';
+    const ech = (link.match(/[?&]ech=([^&#]+)/) || [])[1];
+    if (ech) {
+      yaml += '    ech-opts:\n      enable: true\n      query-server-name: ' + escapeYamlString(decodeURIComponent(ech).split('+')[0]) + '\n';
+    }
   });
 
   yaml += '\nproxy-groups:\n';
@@ -651,6 +718,7 @@ function generateQuantumultConfig(links) {
 
 // 原生 sing-box 1.14 配置；复用生成后的节点，避免两套节点参数逻辑。
 function generateSingBoxConfig(links, params) {
+  const ech = getECHOptions(params);
   const enabled = (name, fallback = true) => params.has(name)
     ? ['true', 'yes', '1'].includes(params.get(name).toLowerCase()) : fallback;
   const tags = new Set(['PROXY', 'AUTO', 'DIRECT']);
@@ -699,12 +767,13 @@ function generateSingBoxConfig(links, params) {
       node.tls = { enabled: true, server_name: sni || host || server,
         insecure: enabled('scv', false) };
       if (fingerprint) node.tls.utls = { enabled: true, fingerprint };
+      if (ech) node.tls.ech = { enabled: true, query_server_name: ech.domain };
     }
     return node;
   });
   if (!nodes.length) throw new Error('没有可用节点');
   const nodeTags = nodes.map(node => node.tag);
-  return JSON.stringify({
+  const config = {
     log: { level: 'info', timestamp: true },
     dns: {
       servers: [
@@ -727,7 +796,15 @@ function generateSingBoxConfig(links, params) {
         { protocol: 'dns', action: 'hijack-dns' },
         { ip_is_private: true, action: 'route', outbound: 'DIRECT' }
       ], final: 'PROXY' }
-  }, null, 2);
+  };
+  if (ech) {
+    const dns = new URL(ech.dns);
+    config.dns.servers.push({ type: 'https', tag: 'dns-ech', server: dns.hostname,
+      server_port: Number(dns.port || 443), path: dns.pathname + dns.search, domain_resolver: 'dns-direct' });
+    // ECH 配置查询走直连 DoH，避免建立代理之前又依赖代理的循环。
+    config.dns.rules = [{ domain: [ech.domain], query_type: ['HTTPS'], action: 'route', server: 'dns-ech' }];
+  }
+  return JSON.stringify(config, null, 2);
 }
 
 // 有限缓存远程模板/规则，避免每次刷新重复下载；失败不缓存。
@@ -868,6 +945,11 @@ async function applySingBoxTemplate(config, params) {
 // 生成订阅内容
 async function handleSubscriptionRequest(request, user, customDomain, piu, ipv4Enabled, ipv6Enabled, ispMobile, ispUnicom, ispTelecom, evEnabled, etEnabled, vmEnabled, disableNonTLS, customPath, customPorts = []) {
   const url = new URL(request.url);
+  let ech;
+  try { ech = getECHOptions(url.searchParams); } catch (error) {
+    return new Response(error.message, { status: 400 });
+  }
+  if (ech) disableNonTLS = true;
   // 每次请求独立读取来源开关，避免并发订阅互相覆盖全局状态。
   const epd = url.searchParams.get('epd') !== 'no';
   const epi = url.searchParams.get('epi') !== 'no';
@@ -896,7 +978,7 @@ async function handleSubscriptionRequest(request, user, customDomain, piu, ipv4E
 
   if (epi) {
     try {
-      const dynamicIPList = await fetchDynamicIPs(ipv4Enabled, ipv6Enabled, ispMobile, ispUnicom, ispTelecom);
+      const dynamicIPList = await fetchDynamicIPs(ipv4Enabled, ipv6Enabled, ispMobile, ispUnicom, ispTelecom, url.searchParams);
       if (dynamicIPList.length > 0) await addNodesFromList(dynamicIPList);
     } catch (error) {
       console.error('获取动态IP失败:', error);
@@ -945,11 +1027,13 @@ async function handleSubscriptionRequest(request, user, customDomain, piu, ipv4E
   }
 
   if (finalLinks.length === 0) {
+    if (ech) return new Response('ECH 已开启，但所选端口没有 TLS 节点', { status: 400 });
     const errorRemark = '所有节点获取失败';
     finalLinks.push('vless://00000000-0000-0000-0000-000000000000@127.0.0.1:80?encryption=none&security=none&type=ws&host=error.com&path=%2F#' + encodeURIComponent(errorRemark));
   }
 
   let subscriptionContent;
+  if (ech) for (let index = 0; index < finalLinks.length; index++) finalLinks[index] = addECHToLink(finalLinks[index], ech);
   let contentType = 'text/plain; charset=utf-8';
 
   switch ((target || '').toLowerCase()) {
@@ -1433,6 +1517,25 @@ function generateHomePage(scuValue) {
         <div class="switch" id="switchTLS"></div>
       </div>
 
+      <div class="form-group">
+        <label>动态优选 IP 来源</label>
+        <select id="ipSource"><option value="uouin">api.uouin.com（默认）</option><option value="wetest">wetest（原来源）</option></select>
+        <input type="text" id="dynamicIPUrl" placeholder="可选：自定义兼容 uouin 的 HTTPS API 地址">
+        <label class="checkbox-label"><input type="checkbox" id="ipFallback" checked><span>新 API 失败时回退 wetest</span></label>
+      </div>
+
+      <div class="list-item" onclick="toggleSwitch('switchECH')">
+        <div><div class="list-item-label">ECH（加密 ClientHello）</div><div class="list-item-description">默认关闭；开启后仅生成 TLS 节点，需要客户端和服务端支持</div></div>
+        <div class="switch" id="switchECH"></div>
+      </div>
+      <div class="form-group">
+        <label>ECH 查询域名（可选）</label>
+        <input type="text" id="customECHDomain" placeholder="默认：cloudflare-ech.com">
+        <label>ECH 查询 DNS（HTTPS DoH，可选）</label>
+        <input type="text" id="customDNS" placeholder="默认：https://1.1.1.1/dns-query">
+        <small>sing-box 原生应用 ECH 和查询 DNS；其他客户端转换后是否保留 ECH，取决于转换器和客户端。原生 Clash 使用其自身 DNS 查询 ECH。</small>
+      </div>
+
       <div class="list-item" onclick="toggleSwitch('switchXUDP')">
         <div>
           <div class="list-item-label">XUDP（UDP流量的优化扩展技术）</div>
@@ -1512,6 +1615,7 @@ function generateHomePage(scuValue) {
       switchTJ: false,
       switchVM: false,
       switchTLS: false,
+      switchECH: false,
       switchXUDP: true,
       switchUDP: true,
       switchTFO: true,
@@ -1624,6 +1728,19 @@ function generateHomePage(scuValue) {
       if (!ispUnicom) subscriptionUrl += '&ispUnicom=no';
       if (!ispTelecom) subscriptionUrl += '&ispTelecom=no';
       if (switches.switchTLS) subscriptionUrl += '&dkby=yes';
+      const ipSource = ((document.getElementById('ipSource') || {}).value || 'uouin');
+      if (ipSource !== 'uouin') subscriptionUrl += '&ipSource=' + encodeURIComponent(ipSource);
+      const dynamicIPUrl = (((document.getElementById('dynamicIPUrl') || {}).value || '')).trim();
+      if (dynamicIPUrl) subscriptionUrl += '&dynamicIPUrl=' + encodeURIComponent(dynamicIPUrl);
+      const ipFallback = document.getElementById('ipFallback');
+      if (ipFallback && !ipFallback.checked) subscriptionUrl += '&ipFallback=no';
+      if (switches.switchECH) {
+        subscriptionUrl += '&ech=yes';
+        const echDomain = (((document.getElementById('customECHDomain') || {}).value || '')).trim();
+        const echDNS = (((document.getElementById('customDNS') || {}).value || '')).trim();
+        if (echDomain) subscriptionUrl += '&customECHDomain=' + encodeURIComponent(echDomain);
+        if (echDNS) subscriptionUrl += '&customDNS=' + encodeURIComponent(echDNS);
+      }
       if (customPath && customPath !== '/') subscriptionUrl += '&path=' + encodeURIComponent(customPath);
       if (customPortsRaw) subscriptionUrl += '&ports=' + encodeURIComponent(customPortsRaw);
 
