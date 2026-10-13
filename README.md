@@ -69,7 +69,10 @@ https://your-worker.workers.dev/{UUID}/sub?domain=your-domain.com&epd=yes&epi=ye
 - sing-box 复用现有的域名、UUID/Password、路径、端口、协议、节点来源和筛选参数，并将前端开关传递为 `xudp`、`udp`、`tfo`、`scv`（`true/false`）。直接调用时前三项默认开启，`scv` 默认关闭；`udp=false` 限制代理节点为 TCP，`xudp` 控制 VLESS 的 UDP 编码，`scv` 控制 TLS 证书校验。
 - WebSocket 路径中的 `?ed=2560` 等参数会转换为 sing-box 的 `max_early_data` 和 `early_data_header_name`，数值来自填写的路径。
 - sing-box 基础配置包含 Android TUN、系统 DNS 解析节点域名、代理 DoH、手动/自动节点选择，以及局域网直连；其他流量默认走 PROXY。`ipv6=no` 使用 IPv4 DNS 策略。
-- 远程 Clash INI 模板及 Emoji、Expand、New Name、FDN 转换器选项不应用于原生 sing-box JSON。这些选项继续用于原有订阅转换流程。
+- SING-BOX 也会使用上方选中的内置/自定义远程 INI 模板：动态转换 `custom_proxy_group` 和 `ruleset`，保留分组顺序、默认选择、节点正则筛选、测速间隔与分流顺序。未选模板时沿用基础配置。
+- 原生 sing-box 支持 INI 的 `select`/`url-test` 分组，以及 DOMAIN、DOMAIN-SUFFIX、DOMAIN-KEYWORD、IP-CIDR、IP-CIDR6、PROCESS-NAME、GEOIP、FINAL/MATCH 规则。规则下载后内嵌到配置；GEOIP 国家规则使用 MetaCubeX 的 sing-box JSON 数据。URL-REGEX 无法在 TUN 中等价转换，会跳过并记录数量；Android 不支持进程名路由。其他不支持的分组/规则、无匹配节点、循环引用、远程下载失败会返回明确的 HTTP 422 错误，不静默退回基础配置。
+- 直接调用 sing-box 订阅时可以传入 `config=<HTTPS INI 地址>` 或 `config_mode=acl_Kisoul/acl_default/acl_nospeed/acl_mini`，模板地址及分组从远程文件读取，不写死分组。模板和规则缓存 5 分钟，下载超时 10 秒，最多 40 个远程规则来源。大型模板首次刷新需要下载更多规则，生成的 JSON 也会更大。
+- Emoji、Expand、New Name、FDN 转换器选项继续用于原有订阅转换流程；sing-box 模板规则固定内嵌，不依赖这些选项。
 - 更新并部署 `_worker.js` 后，需要重新点击 SING-BOX 生成订阅；已有的 `url.v1.mk/sub?target=sing-box` 链接不会自动切换。
 
 - 这只是一个订阅生成工具，不提供代理服务

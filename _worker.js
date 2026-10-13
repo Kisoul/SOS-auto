@@ -730,6 +730,141 @@ function generateSingBoxConfig(links, params) {
   }, null, 2);
 }
 
+// 有限缓存远程模板/规则，避免每次刷新重复下载；失败不缓存。
+const singBoxTemplateCache = new Map();
+async function fetchSingBoxTemplateText(address) {
+  if (new URL(address).protocol !== 'https:') throw new Error('模板和规则地址必须使用 HTTPS');
+  const cached = singBoxTemplateCache.get(address);
+  if (cached && cached.expires > Date.now()) return cached.text;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch(address, { signal: controller.signal });
+    if (!response.ok) throw new Error('远程文件 HTTP ' + response.status + ': ' + address);
+    const text = await response.text();
+    if (singBoxTemplateCache.size >= 64) singBoxTemplateCache.delete(singBoxTemplateCache.keys().next().value);
+    singBoxTemplateCache.set(address, { text, expires: Date.now() + 300000 });
+    return text;
+  } finally { clearTimeout(timer); }
+}
+
+async function applySingBoxTemplate(config, params) {
+  const mode = params.get('config_mode');
+  if (mode && mode !== 'default' && !presetClashConfigMap[mode] && !params.get('config')) throw new Error('未知模板模式: ' + mode);
+  const templateUrl = params.get('config') || presetClashConfigMap[params.get('config_mode')];
+  if (!templateUrl) return { config, skipped: 0 };
+  const ini = await fetchSingBoxTemplateText(templateUrl);
+  const groupDefs = [], ruleDefs = [];
+  let customSection = false;
+  for (const raw of ini.split(/\r?\n/)) {
+    const line = raw.trim().replace(/^\uFEFF/, '');
+    if (!line || /^[;#]/.test(line)) continue;
+    if (line.startsWith('[')) { customSection = line.toLowerCase() === '[custom]'; continue; }
+    if (!customSection) continue;
+    if (line.startsWith('custom_proxy_group=')) groupDefs.push(line.slice(19).split('`'));
+    if (line.startsWith('ruleset=')) {
+      const value = line.slice(8), comma = value.indexOf(',');
+      if (comma < 0) throw new Error('无效 ruleset 定义');
+      ruleDefs.push({ policy: value.slice(0, comma).trim(), source: value.slice(comma + 1).trim() });
+    }
+  }
+  if (!groupDefs.length || !ruleDefs.length) throw new Error('模板缺少 [custom] 分组或 ruleset');
+  const names = new Set(['DIRECT', 'REJECT']);
+  for (const [name, type] of groupDefs) {
+    if (!name || names.has(name)) throw new Error('重复或保留的分组名称: ' + name);
+    if (!['select', 'url-test'].includes(type)) throw new Error('暂不支持分组类型: ' + type);
+    names.add(name);
+  }
+  const nodes = config.outbounds.filter(node => ['vless', 'trojan', 'vmess'].includes(node.type));
+  for (const node of nodes) {
+    const base = node.tag; let suffix = 2;
+    while (names.has(node.tag)) node.tag = base + ' (' + suffix++ + ')';
+    names.add(node.tag);
+  }
+  const groups = groupDefs.map(parts => {
+    const [tag, type] = parts;
+    const filters = type === 'url-test' ? parts.slice(2, -2) : parts.slice(2);
+    const choices = [];
+    for (const filter of filters) {
+      if (filter.startsWith('[]')) {
+        const choice = filter.slice(2);
+        if (!names.has(choice)) throw new Error('未知分组引用: ' + choice);
+        choices.push(choice);
+      } else {
+        const regex = new RegExp(filter);
+        choices.push(...nodes.filter(node => regex.test(node.tag)).map(node => node.tag));
+      }
+    }
+    const outbounds = [...new Set(choices)];
+    if (!outbounds.length) throw new Error('分组没有匹配节点: ' + tag);
+    if (type === 'select') return { type: 'selector', tag, outbounds, default: outbounds[0] };
+    const timing = parts[parts.length - 1].split(',');
+    const seconds = Number(timing[0]), tolerance = Number(timing[2] || 50);
+    if (!Number.isFinite(seconds) || seconds <= 0 || !Number.isFinite(tolerance) || tolerance < 0) throw new Error('无效测速参数');
+    return { type: 'urltest', tag, outbounds, url: parts[parts.length - 2], interval: seconds + 's', tolerance };
+  });
+  const groupMap = new Map(groups.map(group => [group.tag, group]));
+  function checkCycles(tag, path = new Set()) {
+    if (!groupMap.has(tag)) return;
+    if (path.has(tag)) throw new Error('分组循环引用: ' + tag);
+    for (const child of groupMap.get(tag).outbounds) checkCycles(child, new Set([...path, tag]));
+  }
+  groups.forEach(group => checkCycles(group.tag));
+  const sources = [...new Set(ruleDefs.map(rule => rule.source).filter(source => !source.startsWith('[]')))];
+  if (sources.length > 40) throw new Error('远程规则来源不能超过 40 个');
+  const texts = new Map();
+  // 分批请求限制并发数，同时保持后续路由规则的模板顺序。
+  for (let index = 0; index < sources.length; index += 4) {
+    await Promise.all(sources.slice(index, index + 4).map(async source => {
+      texts.set(source, await fetchSingBoxTemplateText(source));
+    }));
+  }
+  const rules = [{ action: 'sniff' }, { protocol: 'dns', action: 'hijack-dns' },
+    { action: 'resolve', server: 'dns-proxy' }];
+  const ruleSets = [];
+  let final = groups[0].tag, skipped = 0;
+  for (const definition of ruleDefs) {
+    if (!names.has(definition.policy)) throw new Error('未知规则分组: ' + definition.policy);
+    const buckets = {};
+    const lines = definition.source.startsWith('[]') ? [definition.source.slice(2)] : texts.get(definition.source).split(/\r?\n/);
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line || /^[#;]/.test(line)) continue;
+      const [kind, value] = line.split(',').map(part => part.trim());
+      if (kind === 'FINAL' || kind === 'MATCH') { final = definition.policy; continue; }
+      // URL 路径是 HTTP 应用层信息，无法在 TUN 路由中等价匹配。
+      if (kind === 'URL-REGEX') { skipped++; continue; }
+      if (kind === 'GEOIP') {
+        if (value === 'LAN' || value === 'private') buckets.ip_is_private = true;
+        else {
+          if (!/^[a-z]{2}$/i.test(value)) throw new Error('不支持 GEOIP: ' + value);
+          const geo = JSON.parse(await fetchSingBoxTemplateText('https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geoip/' + value.toLowerCase() + '.json'));
+          for (const rule of geo.rules || []) if (rule.ip_cidr) (buckets.ip_cidr ||= []).push(...rule.ip_cidr);
+        }
+        continue;
+      }
+      const field = { 'DOMAIN': 'domain', 'DOMAIN-SUFFIX': 'domain_suffix', 'DOMAIN-KEYWORD': 'domain_keyword',
+        'IP-CIDR': 'ip_cidr', 'IP-CIDR6': 'ip_cidr', 'PROCESS-NAME': 'process_name' }[kind];
+      if (!field || !value) throw new Error('暂不支持规则: ' + line);
+      (buckets[field] ||= []).push(field === 'domain_suffix' ? value.replace(/^\./, '') : value);
+    }
+    const headless = Object.entries(buckets).map(([field, values]) => ({ [field]: Array.isArray(values) ? [...new Set(values)] : values }));
+    if (headless.length) {
+      const tag = 'template-rule-' + ruleSets.length;
+      ruleSets.push({ type: 'inline', tag, rules: headless });
+      rules.push({ rule_set: tag, action: 'route', outbound: definition.policy });
+    }
+  }
+  config.outbounds = [...groups, { type: 'direct', tag: 'DIRECT', domain_resolver: 'dns-direct' },
+    { type: 'block', tag: 'REJECT' }, ...nodes];
+  config.dns.servers.find(server => server.tag === 'dns-proxy').detour = groups[0].tag;
+  config.route.rules = rules;
+  config.route.rule_set = ruleSets;
+  config.route.final = final;
+  config.experimental = { cache_file: { enabled: true }, clash_api: {} };
+  return { config, skipped };
+}
+
 // 生成订阅内容
 async function handleSubscriptionRequest(request, user, customDomain, piu, ipv4Enabled, ipv6Enabled, ispMobile, ispUnicom, ispTelecom, evEnabled, etEnabled, vmEnabled, disableNonTLS, customPath, customPorts = []) {
   const url = new URL(request.url);
@@ -819,7 +954,14 @@ async function handleSubscriptionRequest(request, user, customDomain, piu, ipv4E
 
   switch ((target || '').toLowerCase()) {
     case 'sing-box':
-      subscriptionContent = generateSingBoxConfig(finalLinks, url.searchParams);
+      try {
+        const result = await applySingBoxTemplate(JSON.parse(generateSingBoxConfig(finalLinks, url.searchParams)), url.searchParams);
+        subscriptionContent = JSON.stringify(result.config, null, 2);
+        if (result.skipped) console.warn('sing-box 模板忽略 URL-REGEX 条目:', result.skipped);
+      } catch (error) {
+        return new Response('sing-box 模板转换失败: ' + error.message, { status: 422,
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+      }
       contentType = 'application/json; charset=utf-8';
       break;
     case 'clash':
@@ -1248,7 +1390,7 @@ function generateHomePage(scuValue) {
           <button type="button" class="client-btn" onclick="generateClientLink('v2ray', 'Shadowrocket')" style="font-size:13px;">Shadowrocket</button>
         </div>
         <div class="result-url" id="clientSubscriptionUrl"></div>
-      <p style="font-size:12px;color:#86868b;">SING-BOX 使用原生 JSON（1.14），支持 UDP/XUDP/TFO/证书校验开关，基础路由为局域网直连、其他流量走所选节点。远程 Clash 模板及 Emoji/Expand/New Name/FDN 选项用于订阅转换器，不用于 SING-BOX。</p>
+      <p style="font-size:12px;color:#86868b;">SING-BOX 使用原生 JSON（1.14），支持 UDP/XUDP/TFO/证书校验及上方选中的远程 INI 模板分组、分流。规则会写入配置；URL-REGEX 无法转换，Android 不支持按进程名分流。Emoji/Expand/New Name/FDN 仍用于其他客户端的订阅转换器。</p>
       </div>
 
       <div class="form-group">
@@ -1574,11 +1716,16 @@ function generateHomePage(scuValue) {
 
       // sing-box 原生输出；不改变其他客户端的订阅转换器及远程模板流程。
       if (clientType === 'sing-box') {
+        if (clashConfigMode === 'custom' && !finalClashConfigUrl) {
+          alert('请填写自定义远程配置文件地址');
+          return;
+        }
         finalUrl = subscriptionUrl + '&target=sing-box'
           + '&xudp=' + xudpEnabled
           + '&udp=' + udpEnabled
           + '&tfo=' + tfoEnabled
           + '&scv=' + scvEnabled;
+        if (finalClashConfigUrl) finalUrl += '&config=' + encodeURIComponent(finalClashConfigUrl);
         urlElement.textContent = finalUrl;
         urlElement.style.display = 'block';
         schemeUrl = 'sing-box://install-config?url=' + encodeURIComponent(finalUrl);
