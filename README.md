@@ -60,7 +60,7 @@ https://your-worker.workers.dev/{UUID}/sub?domain=your-domain.com&epd=yes&epi=ye
 - `ipFallback` - 新 API 失败/无有效结果时回退 wetest（默认开启，`no` 关闭）；请求超时 5 秒
 - `ech` - ECH 开关（默认关闭，`yes` 开启），开启后强制仅 TLS；自定义端口没有 TLS 节点时返回 400
 - `customECHDomain` - ECH 配置查询域名，默认 `cloudflare-ech.com`
-- `customDNS` - ECH 查询的 HTTPS DoH 地址，默认 `https://1.1.1.1/dns-query`，支持自定义端口、路径和查询参数
+- `customDNS` - ECH 查询的 HTTPS DoH 地址，默认 `https://dns.alidns.com/dns-query`，支持自定义端口、路径和查询参数
 - `ev` - 启用VLESS（默认yes）
 - `et` - 启用Trojan（默认no）
 - `mess` - 启用VMess（默认no，注意不是vm，会被屏蔽）

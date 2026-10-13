@@ -172,7 +172,7 @@ function getECHOptions(params) {
   if (params.get('ech') !== 'yes') return null;
   const domain = params.get('customECHDomain') || 'cloudflare-ech.com';
   if (!/^(?=.{1,253}$)[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+$/.test(domain)) throw new Error('ECH 查询域名无效');
-  const dns = new URL(params.get('customDNS') || 'https://1.1.1.1/dns-query');
+  const dns = new URL(params.get('customDNS') || 'https://dns.alidns.com/dns-query');
   if (dns.protocol !== 'https:' || dns.username || dns.password || dns.hash) throw new Error('ECH DNS 必须为不含凭据的 HTTPS DoH 地址');
   return { domain, dns: dns.toString() };
 }
@@ -1685,7 +1685,7 @@ function generateHomePage(scuValue) {
         <label>ECH 查询域名（可选）</label>
         <input type="text" id="customECHDomain" placeholder="默认：cloudflare-ech.com">
         <label>ECH 查询 DNS（HTTPS DoH，可选）</label>
-        <input type="text" id="customDNS" placeholder="默认：https://1.1.1.1/dns-query">
+        <input type="text" id="customDNS" placeholder="默认：https://dns.alidns.com/dns-query">
         <small>sing-box 原生应用 ECH 和查询 DNS；其他客户端转换后是否保留 ECH，取决于转换器和客户端。原生 Clash 使用其自身 DNS 查询 ECH。</small>
       </div>
 
@@ -1828,7 +1828,7 @@ function generateHomePage(scuValue) {
       ['switchEmoji','switchExpand','switchNewName','switchFDN'].forEach(function (id) { converter.appendChild(row(id)); });
       const sections = [
         ['连接信息','填写代理域名与身份信息，端口和路径可按需调整。',connection],
-        ['节点来源','可组合多个来源；原生地址始终保留。',[...sources,field('githubUrl'),dynamic]],
+        ['节点来源','可组合多个来源；原生地址始终保留。',[sources[0],sources[1],dynamic,sources[2],field('githubUrl')]],
         ['协议与连接','选择至少一种协议，再配置加密与传输选项。',[protocol,row('switchECH'),ech,row('switchTLS'),row('switchUDP'),row('switchXUDP'),row('switchTFO'),row('switchSCV')]],
         ['分组与分流','从远程模板读取策略；默认模式使用基础分组。',[field('clashConfigMode'),field('clashConfigUrl')]],
         ['生成订阅','先选客户端，选项会同步显示对应的支持范围。',[client,converter]]
