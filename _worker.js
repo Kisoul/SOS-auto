@@ -649,9 +649,94 @@ function generateQuantumultConfig(links) {
   return btoa(links.join('\n'));
 }
 
+// 原生 sing-box 1.14 配置；复用生成后的节点，避免两套节点参数逻辑。
+function generateSingBoxConfig(links, params) {
+  const enabled = (name, fallback = true) => params.has(name)
+    ? ['true', 'yes', '1'].includes(params.get(name).toLowerCase()) : fallback;
+  const tags = new Set(['PROXY', 'AUTO', 'DIRECT']);
+  const nodes = links.map(link => {
+    let type, server, port, credential, name, tls, sni, fingerprint, host, path;
+    if (link.startsWith('vmess://')) {
+      const bytes = Uint8Array.from(atob(link.slice(8)), c => c.charCodeAt(0));
+      const v = JSON.parse(new TextDecoder().decode(bytes));
+      type = 'vmess'; server = v.add; port = Number(v.port); credential = v.id;
+      name = v.ps; tls = v.tls === 'tls'; sni = v.sni || v.host;
+      fingerprint = v.fp; host = v.host; path = v.path || '/';
+    } else {
+      const v = new URL(link);
+      type = v.protocol.slice(0, -1); server = v.hostname; port = Number(v.port);
+      credential = decodeURIComponent(v.username); name = decodeURIComponent(v.hash.slice(1));
+      tls = v.searchParams.get('security') === 'tls';
+      sni = v.searchParams.get('sni'); fingerprint = v.searchParams.get('fp');
+      host = v.searchParams.get('host'); path = v.searchParams.get('path') || '/';
+    }
+    server = server.replace(/^\[|\]$/g, '');
+    if (!['vless', 'trojan', 'vmess'].includes(type) || !server || !Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new Error('无效的 sing-box 节点');
+    }
+    const baseTag = name || server + ':' + port;
+    let tag = baseTag, suffix = 2;
+    while (tags.has(tag)) tag = baseTag + ' (' + suffix++ + ')';
+    tags.add(tag);
+    const transport = { type: 'ws', path, headers: host ? { Host: host } : {} };
+    // Xray 的 ?ed= 参数在 sing-box 中需要转换成独立的早期数据字段。
+    const wsUrl = new URL(path, 'https://ws.invalid');
+    const earlyData = wsUrl.searchParams.get('ed');
+    if (earlyData !== null && /^\d+$/.test(earlyData) && Number(earlyData) > 0) {
+      wsUrl.searchParams.delete('ed');
+      transport.path = wsUrl.pathname + wsUrl.search + wsUrl.hash;
+      transport.max_early_data = Number(earlyData);
+      transport.early_data_header_name = 'Sec-WebSocket-Protocol';
+    }
+    const node = { type, tag, server, server_port: port, transport,
+      tcp_fast_open: enabled('tfo'), domain_resolver: 'dns-direct' };
+    if (type === 'trojan') node.password = credential;
+    else node.uuid = credential;
+    if (type === 'vmess') { node.security = 'auto'; node.alter_id = 0; }
+    if (!enabled('udp')) node.network = 'tcp';
+    if (type === 'vless') node.packet_encoding = enabled('xudp') ? 'xudp' : '';
+    if (tls) {
+      node.tls = { enabled: true, server_name: sni || host || server,
+        insecure: enabled('scv', false) };
+      if (fingerprint) node.tls.utls = { enabled: true, fingerprint };
+    }
+    return node;
+  });
+  if (!nodes.length) throw new Error('没有可用节点');
+  const nodeTags = nodes.map(node => node.tag);
+  return JSON.stringify({
+    log: { level: 'info', timestamp: true },
+    dns: {
+      servers: [
+        { type: 'local', tag: 'dns-direct' },
+        { type: 'https', tag: 'dns-proxy', server: '1.1.1.1', path: '/dns-query', detour: 'PROXY' }
+      ],
+      final: 'dns-proxy', strategy: params.get('ipv6') === 'no' ? 'ipv4_only' : 'prefer_ipv4'
+    },
+    inbounds: [{ type: 'tun', tag: 'tun-in', address: ['172.19.0.1/30'],
+      auto_route: true, strict_route: true, stack: 'mixed' }],
+    outbounds: [
+      { type: 'selector', tag: 'PROXY', outbounds: ['AUTO', ...nodeTags, 'DIRECT'], default: 'AUTO' },
+      { type: 'urltest', tag: 'AUTO', outbounds: nodeTags,
+        url: 'https://www.gstatic.com/generate_204', interval: '3m', tolerance: 50 },
+      { type: 'direct', tag: 'DIRECT', domain_resolver: 'dns-direct' },
+      ...nodes
+    ],
+    route: { auto_detect_interface: true, default_domain_resolver: 'dns-direct',
+      rules: [
+        { protocol: 'dns', action: 'hijack-dns' },
+        { ip_is_private: true, action: 'route', outbound: 'DIRECT' }
+      ], final: 'PROXY' }
+  }, null, 2);
+}
+
 // 生成订阅内容
 async function handleSubscriptionRequest(request, user, customDomain, piu, ipv4Enabled, ipv6Enabled, ispMobile, ispUnicom, ispTelecom, evEnabled, etEnabled, vmEnabled, disableNonTLS, customPath, customPorts = []) {
   const url = new URL(request.url);
+  // 每次请求独立读取来源开关，避免并发订阅互相覆盖全局状态。
+  const epd = url.searchParams.get('epd') !== 'no';
+  const epi = url.searchParams.get('epi') !== 'no';
+  const egi = url.searchParams.get('egi') !== 'no';
   const finalLinks = [];
   const workerDomain = url.hostname;
   const nodeDomain = customDomain || url.hostname;
@@ -733,6 +818,10 @@ async function handleSubscriptionRequest(request, user, customDomain, piu, ipv4E
   let contentType = 'text/plain; charset=utf-8';
 
   switch ((target || '').toLowerCase()) {
+    case 'sing-box':
+      subscriptionContent = generateSingBoxConfig(finalLinks, url.searchParams);
+      contentType = 'application/json; charset=utf-8';
+      break;
     case 'clash':
     case 'clashr':
       subscriptionContent = generateClashConfig(finalLinks);
@@ -1159,6 +1248,7 @@ function generateHomePage(scuValue) {
           <button type="button" class="client-btn" onclick="generateClientLink('v2ray', 'Shadowrocket')" style="font-size:13px;">Shadowrocket</button>
         </div>
         <div class="result-url" id="clientSubscriptionUrl"></div>
+      <p style="font-size:12px;color:#86868b;">SING-BOX 使用原生 JSON（1.14），支持 UDP/XUDP/TFO/证书校验开关，基础路由为局域网直连、其他流量走所选节点。远程 Clash 模板及 Emoji/Expand/New Name/FDN 选项用于订阅转换器，不用于 SING-BOX。</p>
       </div>
 
       <div class="form-group">
@@ -1482,6 +1572,24 @@ function generateHomePage(scuValue) {
         return;
       }
 
+      // sing-box 原生输出；不改变其他客户端的订阅转换器及远程模板流程。
+      if (clientType === 'sing-box') {
+        finalUrl = subscriptionUrl + '&target=sing-box'
+          + '&xudp=' + xudpEnabled
+          + '&udp=' + udpEnabled
+          + '&tfo=' + tfoEnabled
+          + '&scv=' + scvEnabled;
+        urlElement.textContent = finalUrl;
+        urlElement.style.display = 'block';
+        schemeUrl = 'sing-box://install-config?url=' + encodeURIComponent(finalUrl);
+        tryOpenApp(schemeUrl, function () {
+          navigator.clipboard.writeText(finalUrl).then(function () {
+            alert('SING-BOX 订阅链接已复制');
+          });
+        });
+        return;
+      }
+
       // 其他客户端仍走订阅转换器
       const encodedUrl = encodeURIComponent(subscriptionUrl);
       finalUrl = SUB_CONVERTER_URL
@@ -1661,3 +1769,4 @@ export default {
     return new Response('Not Found', { status: 404 });
   }
 };
+
