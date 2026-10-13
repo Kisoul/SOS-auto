@@ -43,10 +43,11 @@ https://your-worker.workers.dev/{UUID}/sub?domain=your-domain.com&epd=yes&epi=ye
 - `clash` - Clash配置
 - `surge` - Surge配置  
 - `quantumult` - Quantumult配置
+- `sing-box` - Worker 原生生成的 sing-box 1.14 JSON 配置
 
 ## URL参数
 
-所有配置都通过URL参数控制，不需要环境变量。
+节点配置通过 URL 参数控制。环境变量 `scu` 可覆盖订阅转换器地址，默认 `https://url.v1.mk/sub`。
 
 主要参数：
 - `domain` - 你的域名（必填）
@@ -59,12 +60,20 @@ https://your-worker.workers.dev/{UUID}/sub?domain=your-domain.com&epd=yes&epi=ye
 - `mess` - 启用VMess（默认no，注意不是vm，会被屏蔽）
 - `ipv4/ipv6` - IP版本选择（默认都开启）
 - `ispMobile/ispUnicom/ispTelecom` - 运营商筛选（默认都开启）
-- `target` - 输出格式（base64/clash/surge/quantumult）
+- `target` - 输出格式（base64/clash/surge/quantumult/sing-box）
 - `GitHub优选URL` - 可输入优选ip的网站，例如：https://ip.164746.xyz/ipTop10.html
 
 ## 注意事项
+
+- SING-BOX 按钮直接生成 Worker 的 `/{UUID}/sub?...&target=sing-box` 链接，不经过订阅转换器。其他客户端保持原来的转换器流程；Clash 的默认原生输出和远程模板流程也保持原样。
+- sing-box 复用现有的域名、UUID/Password、路径、端口、协议、节点来源和筛选参数，并将前端开关传递为 `xudp`、`udp`、`tfo`、`scv`（`true/false`）。直接调用时前三项默认开启，`scv` 默认关闭；`udp=false` 限制代理节点为 TCP，`xudp` 控制 VLESS 的 UDP 编码，`scv` 控制 TLS 证书校验。
+- WebSocket 路径中的 `?ed=2560` 等参数会转换为 sing-box 的 `max_early_data` 和 `early_data_header_name`，数值来自填写的路径。
+- sing-box 基础配置包含 Android TUN、系统 DNS 解析节点域名、代理 DoH、手动/自动节点选择，以及局域网直连；其他流量默认走 PROXY。`ipv6=no` 使用 IPv4 DNS 策略。
+- 远程 Clash INI 模板及 Emoji、Expand、New Name、FDN 转换器选项不应用于原生 sing-box JSON。这些选项继续用于原有订阅转换流程。
+- 更新并部署 `_worker.js` 后，需要重新点击 SING-BOX 生成订阅；已有的 `url.v1.mk/sub?target=sing-box` 链接不会自动切换。
 
 - 这只是一个订阅生成工具，不提供代理服务
 - 生成的节点需要配合你自己的服务器使用
 - UUID必须是标准格式（xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx）
 - VMess参数用的是`mess`不是`vm`，因为`vm`会被某些地方屏蔽
+
