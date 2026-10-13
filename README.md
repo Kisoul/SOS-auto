@@ -7,7 +7,7 @@ GitHub: https://github.com/byJoey/yx-auto
 ## 主要功能
 
 - 优选域名：内置了一些常用的优选域名
-- 优选IP：从wetest.vip获取动态IP，支持IPv4/IPv6
+- 优选IP：默认从 api.uouin.com 获取动态IP，可切换 wetest，支持IPv4/IPv6和失败回退
 - GitHub优选：可以从GitHub仓库拉取IP列表
 - 多协议支持：VLESS、Trojan、VMess
 - 多客户端格式：Clash、Surge、Quantumult X等
@@ -55,6 +55,12 @@ https://your-worker.workers.dev/{UUID}/sub?domain=your-domain.com&epd=yes&epi=ye
 - `epi` - 启用优选IP（默认yes）
 - `egi` - 启用GitHub优选（默认yes）
 - `piu` - 自定义IP来源URL（可选）
+- `ipSource` - 动态优选来源（默认 `uouin`，可选 `wetest`），仅影响 `epi` 来源
+- `dynamicIPUrl` - 自定义兼容 uouin JSON 分组及签名协议的 HTTPS API 地址（可选）
+- `ipFallback` - 新 API 失败/无有效结果时回退 wetest（默认开启，`no` 关闭）；请求超时 5 秒
+- `ech` - ECH 开关（默认关闭，`yes` 开启），开启后强制仅 TLS；自定义端口没有 TLS 节点时返回 400
+- `customECHDomain` - ECH 配置查询域名，默认 `cloudflare-ech.com`
+- `customDNS` - ECH 查询的 HTTPS DoH 地址，默认 `https://1.1.1.1/dns-query`，支持自定义端口、路径和查询参数
 - `ev` - 启用VLESS（默认yes）
 - `et` - 启用Trojan（默认no）
 - `mess` - 启用VMess（默认no，注意不是vm，会被屏蔽）
@@ -64,6 +70,9 @@ https://your-worker.workers.dev/{UUID}/sub?domain=your-domain.com&epd=yes&epi=ye
 - `GitHub优选URL` - 可输入优选ip的网站，例如：https://ip.164746.xyz/ipTop10.html
 
 ## 注意事项
+
+- ECH 关闭时沿用原节点输出。开启时 VLESS/Trojan 链接和 VMess JSON 携带 `ech=查询域名+DoH地址`；原生 sing-box 使用 `tls.ech.query_server_name` 并以独立直连 DoH 查询 HTTPS 记录，避免代理启动的 DNS 循环。原生 Clash 的 VLESS 输出添加 `ech-opts`，使用 Clash 自身的 DNS；远程转换器及其他客户端是否保留和使用 ECH 参数，需要实际客户端支持，不能保证。ECH 不改变现有 WebSocket 端口、路径、模板和 SCV 设置，不强制设置 h3/h2 ALPN。
+- 新 API 沿用上游 MD5/时间戳签名，解析电信/联通/移动/多线/IPv6 分组，并校验地址、去重；来源无运营商细分的多线与 IPv6 组，仅在至少选择一个运营商时保留。`egi`/`piu` 自定义 IP 来源独立于此次来源切换。签名协议或接口变更时可切换 wetest。
 
 - SING-BOX 按钮直接生成 Worker 的 `/{UUID}/sub?...&target=sing-box` 链接，不经过订阅转换器。其他客户端保持原来的转换器流程；Clash 的默认原生输出和远程模板流程也保持原样。
 - sing-box 复用现有的域名、UUID/Password、路径、端口、协议、节点来源和筛选参数，并将前端开关传递为 `xudp`、`udp`、`tfo`、`scv`（`true/false`）。直接调用时前三项默认开启，`scv` 默认关闭；`udp=false` 限制代理节点为 TCP，`xudp` 控制 VLESS 的 UDP 编码，`scv` 控制 TLS 证书校验。
