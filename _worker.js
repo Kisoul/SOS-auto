@@ -24,6 +24,8 @@ const directDomains = [
   { domain: 'hku2.kisoul.org' },
   { domain: 'hkm1.kisoul.org' },
   { domain: 'hkm2.kisoul.org' },
+  { domain: 'bn1.kisoul.org' },
+  { domain: 'bn2.kisoul.org' },
   { domain: 'lgm1.kisoul.org' },
   { domain: 'lgm2.kisoul.org' },
   { domain: 'yg7.ygkkk.dpdns.org' },
