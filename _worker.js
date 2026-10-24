@@ -1908,6 +1908,14 @@ function generateHomePage(scuValue) {
       });
     }
 
+    function invalidateSubscriptionLink() {
+      const result = document.getElementById('clientSubscriptionUrl');
+      if (!result || !result.textContent) return;
+      result.textContent = '设置已修改，请重新生成订阅，并在客户端替换旧订阅地址；刷新旧地址不会应用页面上的新设置。';
+      result.style.display = 'block';
+      result.setAttribute('aria-live', 'polite');
+    }
+
     function toggleSwitch(id) {
       if (disabledSwitches.has(id)) return;
       if (['switchVL','switchTJ','switchVM'].includes(id) && switches[id]
@@ -1921,6 +1929,7 @@ function generateHomePage(scuValue) {
       }
       if (!switches.switchUDP || !switches.switchVL) switches.switchXUDP = false;
       syncOptionState();
+      invalidateSubscriptionLink();
     }
 
     function toggleClashConfigInput() {
@@ -2040,6 +2049,7 @@ function generateHomePage(scuValue) {
         if (echDNS) subscriptionUrl += '&customDNS=' + encodeURIComponent(echDNS);
       }
       if (switches.switchXHTTP) subscriptionUrl += '&transport=xhttp&xhttpReady=yes&client=' + (clientType === 'clash' ? (clientName === 'STASH' ? 'stash' : 'mihomo') : clientName === 'Shadowrocket' ? 'shadowrocket' : clientName === 'V2RAYNG' ? 'v2rayng' : 'v2ray');
+      else if (clientType === 'clash') subscriptionUrl += '&transport=ws';
       if (customPath && customPath !== '/') subscriptionUrl += '&path=' + encodeURIComponent(customPath);
       if (customPortsRaw) subscriptionUrl += '&ports=' + encodeURIComponent(customPortsRaw);
 
@@ -2230,6 +2240,8 @@ function generateHomePage(scuValue) {
         });
       });
       selectClientProfile();
+      document.addEventListener('input', invalidateSubscriptionLink);
+      document.addEventListener('change', invalidateSubscriptionLink);
     });
   </script>
 </body>
