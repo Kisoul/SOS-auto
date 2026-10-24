@@ -414,7 +414,7 @@ async function fetchAndParseNewIPs(piu) {
 }
 
 // 生成 VLESS 链接
-function generateLinksFromSource(list, user, workerDomain, disableNonTLS = false, customPath = '/', customPorts = []) {
+function generateLinksFromSource(list, user, workerDomain, disableNonTLS = false, customPath = '/', customPorts = [], transport = 'ws') {
   const CF_HTTP_PORTS = [80, 8080, 8880, 2052, 2082, 2086, 2095];
   const CF_HTTPS_PORTS = [443, 2053, 2083, 2087, 2096, 8443];
   const defaultHttpsPorts = [443];
@@ -457,26 +457,28 @@ function generateLinksFromSource(list, user, workerDomain, disableNonTLS = false
 
     portsToGenerate.forEach(({ port, tls }) => {
       if (tls) {
-        const wsNodeName = nodeNameBase + '-' + port + '-WS-TLS';
+        const wsNodeName = nodeNameBase + '-' + port + '-' + transport.toUpperCase() + '-TLS';
         const wsParams = new URLSearchParams({
           encryption: 'none',
           security: 'tls',
           sni: workerDomain,
           fp: 'chrome',
-          type: 'ws',
+          type: transport,
           host: workerDomain,
           path: wsPath
         });
+        if (transport === 'xhttp') wsParams.set('mode', 'packet-up');
         links.push(proto + '://' + user + '@' + safeIP + ':' + port + '?' + wsParams.toString() + '#' + encodeURIComponent(wsNodeName));
       } else {
-        const wsNodeName = nodeNameBase + '-' + port + '-WS';
+        const wsNodeName = nodeNameBase + '-' + port + '-' + transport.toUpperCase();
         const wsParams = new URLSearchParams({
           encryption: 'none',
           security: 'none',
-          type: 'ws',
+          type: transport,
           host: workerDomain,
           path: wsPath
         });
+        if (transport === 'xhttp') wsParams.set('mode', 'packet-up');
         links.push(proto + '://' + user + '@' + safeIP + ':' + port + '?' + wsParams.toString() + '#' + encodeURIComponent(wsNodeName));
       }
     });
@@ -630,6 +632,18 @@ function generateVMessLinksFromSource(list, user, workerDomain, disableNonTLS = 
   return links;
 }
 
+// Mihomo XHTTP treats Path as a URL path, unlike Xray's path/query split.
+// Strip only the inherited numeric WS early-data option; reject other query/fragment input.
+function normalizeMihomoXHTTPPath(value) {
+  const path = String(value || '/');
+  if (!path.startsWith('/') || path.includes('#')) throw new Error('Mihomo XHTTP 请使用以 / 开头且不含片段的纯路径');
+  const q = path.indexOf('?');
+  if (q < 0) return path;
+  const params = new URLSearchParams(path.slice(q + 1));
+  if ([...params].length && [...params].every(([key, value]) => key === 'ed' && /^\d+$/.test(value))) return path.slice(0, q) || '/';
+  throw new Error('Mihomo XHTTP 不支持此路径查询参数，请填写纯路径，例如 / 或 /xhttp');
+}
+
 // YAML 字符串转义
 function escapeYamlString(str) {
   const s = String(str == null ? '' : str);
@@ -637,7 +651,15 @@ function escapeYamlString(str) {
 }
 
 // 生成 Clash 配置（默认方案）
-function generateClashConfig(links) {
+function generateClashConfig(links, params = new URLSearchParams()) {
+  const enabled = (name, fallback) => params.has(name)
+    ? ['true', 'yes', '1'].includes(params.get(name).toLowerCase()) : fallback;
+  const nativeOptions = params.get('client') !== 'stash';
+  // Current Mihomo forces XUDP for VLESS unless packetaddr is selected.
+  // Do not silently replace it with another server-dependent UDP encoding.
+  if (nativeOptions && params.has('xudp') && !enabled('xudp', true) && enabled('udp', true)) {
+    throw new Error('当前 Mihomo VLESS 实现不能单独关闭 XUDP；可关闭 UDP，或使用明确支持 packetaddr 的其他配置');
+  }
   let yaml = 'port: 7890\n';
   yaml += 'socks-port: 7891\n';
   yaml += 'allow-lan: false\n';
@@ -667,11 +689,26 @@ function generateClashConfig(links) {
     yaml += '    port: ' + port + '\n';
     yaml += '    uuid: ' + uuid + '\n';
     yaml += '    tls: ' + tls + '\n';
-    yaml += '    network: ws\n';
-    yaml += '    ws-opts:\n';
-    yaml += '      path: ' + escapeYamlString(path) + '\n';
-    yaml += '      headers:\n';
-    yaml += '        Host: ' + escapeYamlString(host) + '\n';
+    if (nativeOptions) {
+      if (params.has('udp')) yaml += '    udp: ' + enabled('udp', true) + '\n';
+      if (params.has('tfo')) yaml += '    tfo: ' + enabled('tfo', true) + '\n';
+      if (tls && params.has('scv')) yaml += '    skip-cert-verify: ' + enabled('scv', false) + '\n';
+      if (params.has('xudp') && enabled('udp', true)) yaml += '    packet-encoding: xudp\n';
+    }
+    const isXHTTP = new URL(link).searchParams.get('type') === 'xhttp';
+    if (isXHTTP) {
+      yaml += '    network: xhttp\n';
+      yaml += '    xhttp-opts:\n';
+      yaml += '      path: ' + escapeYamlString(normalizeMihomoXHTTPPath(path)) + '\n';
+      yaml += '      host: ' + escapeYamlString(host) + '\n';
+      yaml += '      mode: packet-up\n';
+    } else {
+      yaml += '    network: ws\n';
+      yaml += '    ws-opts:\n';
+      yaml += '      path: ' + escapeYamlString(path) + '\n';
+      yaml += '      headers:\n';
+      yaml += '        Host: ' + escapeYamlString(host) + '\n';
+    }
     if (sni) yaml += '    servername: ' + escapeYamlString(sni) + '\n';
     const ech = (link.match(/[?&]ech=([^&#]+)/) || [])[1];
     if (ech) {
@@ -690,6 +727,8 @@ function generateClashConfig(links) {
   yaml += '  - GEOIP,CN,DIRECT\n';
   yaml += '  - MATCH,PROXY\n';
 
+  const ech = getECHOptions(params);
+  if (ech && params.get('client') !== 'stash') return applyClashECHDNS(yaml, ech);
   return yaml;
 }
 
@@ -961,11 +1000,22 @@ async function handleSubscriptionRequest(request, user, customDomain, piu, ipv4E
   const nodeDomain = customDomain || url.hostname;
   const target = url.searchParams.get('target') || 'base64';
   const wsPath = customPath || '/';
+  // Unknown clients and every converter path use WS. Explicit capability confirmation is required.
+  let transport = 'ws';
+  const requestedXHTTP = url.searchParams.get('transport') === 'xhttp';
+  const confirmedXHTTP = url.searchParams.get('xhttpReady') === 'yes';
+  if (requestedXHTTP && confirmedXHTTP) {
+    const client = url.searchParams.get('client');
+    const rawCompatible = ['v2ray', 'v2rayng', 'shadowrocket'].includes(client);
+    const yamlCompatible = ['mihomo', 'stash'].includes(client);
+    if (target === 'base64' && rawCompatible) transport = 'xhttp';
+    if (target === 'clash' && yamlCompatible) transport = 'xhttp';
+  }
 
   async function addNodesFromList(list) {
     const useVL = evEnabled;
 
-    if (useVL) finalLinks.push(...generateLinksFromSource(list, user, nodeDomain, disableNonTLS, wsPath, customPorts));
+    if (useVL) finalLinks.push(...generateLinksFromSource(list, user, nodeDomain, disableNonTLS, wsPath, customPorts, transport));
     if (etEnabled) finalLinks.push(...await generateTrojanLinksFromSource(list, user, nodeDomain, disableNonTLS, wsPath, customPorts));
     if (vmEnabled) finalLinks.push(...generateVMessLinksFromSource(list, user, nodeDomain, disableNonTLS, wsPath, customPorts));
   }
@@ -1052,7 +1102,8 @@ async function handleSubscriptionRequest(request, user, customDomain, piu, ipv4E
       break;
     case 'clash':
     case 'clashr':
-      subscriptionContent = generateClashConfig(finalLinks);
+      try { subscriptionContent = generateClashConfig(finalLinks, url.searchParams); }
+      catch (error) { return new Response('Clash DNS 配置失败: ' + error.message, { status: 422 }); }
       contentType = 'text/yaml; charset=utf-8';
       break;
     case 'surge':
@@ -1451,9 +1502,9 @@ function generateHomePage(scuValue) {
       </div>
 
       <div class="form-group">
-        <label>WebSocket路径（可选）</label>
+        <label>Path路径（可选）</label>
         <input type="text" id="customPath" placeholder="留空则使用默认路径 /" value="/">
-        <small>自定义WebSocket路径，例如：/v2ray 或 /</small>
+        <small>自定义 Path 路径，例如：/v2ray 或 /。XHTTP 协议下 ?ed=2560 参数无效；该参数仅用于 WS Early Data。</small>
       </div>
 
       <div class="form-group">
@@ -1595,6 +1646,10 @@ function generateHomePage(scuValue) {
         <label class="checkbox-label fallback-option"><input type="checkbox" id="ipFallback" checked><span>新 API 失败时回退 wetest</span></label>
       </div>
 
+      <div class="list-item" onclick="toggleSwitch('switchXHTTP')">
+        <div><div class="list-item-label">VLESS XHTTP（实验性）</div><div class="list-item-description">支持原始 V2RAY / V2RAYNG（Xray）、Shadowrocket（2.2.67+）及 CLASH（支持 XHTTP 的 Mihomo，含远程 INI 模板）、默认模板 STASH（iOS/tvOS 3.6+、macOS 4.3+）；旧版 Clash 不支持。请确认客户端内核及已部署的 XHTTP 服务端均支持。开启即确认两端支持。当前订阅生成器不实现 Workers XHTTP 转发；普通 WS Worker 不能直接使用。Clash 远程模板由 Worker 在转换后补回 XHTTP；Stash 远程模板、其他客户端及未确认路径回退 WS。Trojan / VMess 继续 WS，路径沿用上方自定义路径；Mihomo 输出会移除遗留的 WS ?ed=数字，其他查询参数请改为纯路径；模式 packet-up。</div><div class="context-note" id="xhttpCompatibilityNote"></div></div>
+        <div class="switch" id="switchXHTTP"></div>
+      </div>
       <div class="list-item" onclick="toggleSwitch('switchECH')">
         <div><div class="list-item-label">ECH（加密 ClientHello）</div><div class="list-item-description">默认关闭；开启后仅生成 TLS 节点，需要客户端和服务端支持</div></div>
         <div class="switch" id="switchECH"></div>
@@ -1604,7 +1659,7 @@ function generateHomePage(scuValue) {
         <input type="text" id="customECHDomain" placeholder="默认：cloudflare-ech.com">
         <label>ECH 查询 DNS（HTTPS DoH，可选）</label>
         <input type="text" id="customDNS" placeholder="默认：https://dns.alidns.com/dns-query">
-        <small>sing-box 原生应用 ECH 和查询 DNS；其他客户端转换后是否保留 ECH，取决于转换器和客户端。原生 Clash 使用其自身 DNS 查询 ECH。</small>
+        <small id="echDNSNote">可自定义 HTTPS DoH，留空使用 https://dns.alidns.com/dns-query；ECH 查询域名留空使用 cloudflare-ech.com。sing-box 与 Clash/Mihomo 应用查询 DNS；Stash 保留原逻辑，其他客户端取决于转换器及内核支持。</small>
       </div>
 
       <div class="list-item" onclick="toggleSwitch('switchXUDP')">
@@ -1687,6 +1742,7 @@ function generateHomePage(scuValue) {
       switchVM: false,
       switchTLS: false,
       switchECH: false,
+      switchXHTTP: false,
       switchXUDP: true,
       switchUDP: true,
       switchTFO: true,
@@ -1701,6 +1757,7 @@ function generateHomePage(scuValue) {
     const PRESET_CONFIG_MAP = ${JSON.stringify(presetClashConfigMap)};
 
     let activeClient = '';
+    let activeClientName = ''; 
     let tlsBeforeECH = false;
     const disabledSwitches = new Set();
 
@@ -1712,6 +1769,7 @@ function generateHomePage(scuValue) {
     function selectClientProfile() {
       const profile = clientProfiles[document.getElementById('clientProfile').value] || clientProfiles['sing-box'];
       activeClient = profile[0];
+      activeClientName = profile[1];
       document.getElementById('generateSubscription').textContent = '生成 ' + profile[1] + ' 订阅';
       syncOptionState();
     }
@@ -1747,7 +1805,7 @@ function generateHomePage(scuValue) {
       const sections = [
         ['连接信息','填写代理域名与身份信息，端口和路径可按需调整。',connection],
         ['节点来源','可组合多个来源；原生地址始终保留。',[sources[0],sources[1],dynamic,sources[2],field('githubUrl')]],
-        ['协议与连接','选择至少一种协议，再配置加密与传输选项。',[protocol,row('switchECH'),ech,row('switchTLS'),row('switchUDP'),row('switchXUDP'),row('switchTFO'),row('switchSCV')]],
+        ['协议与连接','选择至少一种协议，再配置加密与传输选项。',[protocol,row('switchXHTTP'),row('switchECH'),ech,row('switchTLS'),row('switchUDP'),row('switchXUDP'),row('switchTFO'),row('switchSCV')]],
         ['分组与分流','从远程模板读取策略；默认模式使用基础分组。',[field('clashConfigMode'),field('clashConfigUrl')]],
         ['生成订阅','先选客户端，选项会同步显示对应的支持范围。',[client,converter]]
       ];
@@ -1763,6 +1821,12 @@ function generateHomePage(scuValue) {
     function syncOptionState() {
       if (!document.querySelectorAll) return;
       disabledSwitches.clear();
+      const nativeClashOptions = activeClient === 'clash' && activeClientName === 'CLASH'
+        && document.getElementById('clashConfigMode').value === 'default';
+      if (nativeClashOptions) switches.switchXUDP = !!switches.switchUDP && !!switches.switchVL;
+      const xhttpAllowed = switches.switchVL && ((activeClient === 'v2ray' && ['V2RAY','V2RAYNG','Shadowrocket'].includes(activeClientName))
+        || (activeClient === 'clash' && (activeClientName === 'CLASH' || (activeClientName === 'STASH' && document.getElementById('clashConfigMode').value === 'default'))));
+      if (!xhttpAllowed) switches.switchXHTTP = false;
       function availability(id, reason) {
         const element = document.getElementById(id);
         if (!element) return;
@@ -1781,12 +1845,22 @@ function generateHomePage(scuValue) {
         element.setAttribute('aria-checked', String(switches[id]));
         availability(id, '');
       });
+      if (!xhttpAllowed) availability('switchXHTTP', '当前客户端或转换路径不支持本脚本的 XHTTP 输出，自动使用 WS');
+      const xhttpNote = document.getElementById('xhttpCompatibilityNote');
+      if (xhttpNote) xhttpNote.textContent = activeClient === 'sing-box' ? '官方 sing-box 未列出 XHTTP 传输；第三方分支不在本配置支持范围内。'
+        : activeClientName === 'NEKORAY' ? '原版 NEKORAY 4.x 已移除 Xray；按其 sing-box 内核回退 WS。'
+        : activeClient === 'surge' ? 'Surge 官方协议列表未列出 VLESS / XHTTP；回退 WS 不会使 VLESS 自动兼容 Surge。'
+        : activeClient === 'loon' || activeClient === 'quanx' ? '未确认官方 XHTTP 支持，且当前走转换器；回退 WS。'
+        : activeClient === 'clash' && activeClientName === 'CLASH' && document.getElementById('clashConfigMode').value !== 'default' ? 'Mihomo 支持 XHTTP；保留远程 INI 和转换参数，Worker 在转换器输出中补回 XHTTP。需可用 XHTTP 服务端与转发。'
+        : activeClientName === 'STASH' && document.getElementById('clashConfigMode').value !== 'default' ? 'Stash 的远程模板保留原转换流程，此路径仍回退 WS。'
+        : xhttpAllowed ? '请核对上方最低版本与实际内核；开启表示已确认两端支持。脚本无法自动检测客户端版本。' : '请先选择客户端并开启 VLESS。';
       const mode = document.getElementById('clashConfigMode').value;
       const converter = activeClient && activeClient !== 'sing-box' && activeClient !== 'v2ray'
         && (activeClient !== 'clash' || mode !== 'default');
       if (switches.switchECH) availability('switchTLS', 'ECH 已开启，必须保留 TLS');
       if (!switches.switchUDP || !switches.switchVL) availability('switchXUDP', '仅在 UDP 和 VLESS 都开启时生效');
-      if (activeClient && activeClient !== 'sing-box' && !converter) {
+      else if (nativeClashOptions) availability('switchXUDP', '当前 Mihomo VLESS 内核默认启用 XUDP，不能单独关闭；关闭 UDP 后不生效');
+      if (activeClient && activeClient !== 'sing-box' && !nativeClashOptions && !converter) {
         ['switchUDP','switchXUDP','switchTFO','switchSCV'].forEach(function (id) {
           availability(id, '当前原生或原始订阅未应用此选项');
         });
@@ -1806,6 +1880,13 @@ function generateHomePage(scuValue) {
         document.getElementById(id).disabled = !switches.switchIP;
       });
       ['customECHDomain','customDNS'].forEach(function (id) { document.getElementById(id).disabled = !switches.switchECH; });
+      document.getElementById('customDNS').placeholder = '默认：https://dns.alidns.com/dns-query';
+      const dnsNote = document.getElementById('echDNSNote');
+      if (dnsNote) dnsNote.textContent = activeClient === 'sing-box' ? '可自定义 HTTPS DoH，留空使用默认值；仅 ECH 域名的 HTTPS 记录查询使用它，其余 DNS 保持原设置。'
+        : activeClient === 'clash' && activeClientName === 'CLASH' ? '可自定义 HTTPS DoH，留空使用 https://dns.alidns.com/dns-query；ECH 查询域名留空使用 cloudflare-ech.com。仅为 ECH 域名添加 DNS 策略（含节点解析策略），其余模板 DNS 保留；不兼容的 YAML 明确报错。'
+        : activeClientName === 'STASH' ? 'Stash 保留原有 ECH 转换逻辑；此 DoH 值仅随原始节点参数传递，本脚本不改写 Stash DNS，是否采用取决于客户端与转换器。'
+        : activeClient === 'v2ray' ? '可填写 HTTPS DoH；会写入原始节点 ech 参数，实际采用取决于客户端及内核，未进行导入实测。'
+        : 'DoH 值仅随原始节点传给转换器，尚未确认当前客户端是否采用；不能保证转换后 ECH / DNS 生效。';
       document.getElementById('clashConfigMode').disabled = activeClient === 'v2ray';
       document.getElementById('clashConfigUrl').disabled = activeClient === 'v2ray';
       const echPanel = document.getElementById('echOptionsPanel'); if (echPanel) echPanel.hidden = !switches.switchECH;
@@ -1821,7 +1902,7 @@ function generateHomePage(scuValue) {
       document.getElementById('clientScopeNote').textContent = !activeClient ? '点击客户端生成订阅。下方选项会显示该客户端的支持范围。'
         : activeClient === 'sing-box' ? 'sing-box：原生 JSON，支持分组模板和连接选项；转换器专属选项不生效。'
         : activeClient === 'v2ray' ? '原始节点订阅：不应用分组模板及转换器选项。'
-        : converter ? '当前使用订阅转换器；选项是否生效取决于转换器与客户端支持。' : '当前使用原生基础配置；转换器专属选项不生效。';
+        : converter ? '当前使用订阅转换器；选项是否生效取决于转换器与客户端支持。' : nativeClashOptions ? 'Clash/Mihomo 原生配置：UDP、TFO、SCV 已应用到节点；VLESS 的 XUDP 由内核默认启用。转换器专属选项不生效。' : '当前使用原生基础配置；转换器专属选项不生效。';
       document.querySelectorAll('.client-btn').forEach(function (button) {
         button.classList.toggle('selected', !!activeClient && button.getAttribute('onclick').includes("'" + activeClient + "'"));
       });
@@ -1887,6 +1968,7 @@ function generateHomePage(scuValue) {
 
     function generateClientLink(clientType, clientName) {
       activeClient = clientType;
+      activeClientName = clientName;
       syncOptionState();
       const domain = document.getElementById('domain').value.trim();
       const uuid = document.getElementById('uuid').value.trim();
@@ -1957,6 +2039,7 @@ function generateHomePage(scuValue) {
         if (echDomain) subscriptionUrl += '&customECHDomain=' + encodeURIComponent(echDomain);
         if (echDNS) subscriptionUrl += '&customDNS=' + encodeURIComponent(echDNS);
       }
+      if (switches.switchXHTTP) subscriptionUrl += '&transport=xhttp&xhttpReady=yes&client=' + (clientType === 'clash' ? (clientName === 'STASH' ? 'stash' : 'mihomo') : clientName === 'Shadowrocket' ? 'shadowrocket' : clientName === 'V2RAYNG' ? 'v2rayng' : 'v2ray');
       if (customPath && customPath !== '/') subscriptionUrl += '&path=' + encodeURIComponent(customPath);
       if (customPortsRaw) subscriptionUrl += '&ports=' + encodeURIComponent(customPortsRaw);
 
@@ -2010,6 +2093,8 @@ function generateHomePage(scuValue) {
       if (clientType === 'clash') {
         if (!finalClashConfigUrl) {
           finalUrl = subscriptionUrl + '&target=clash';
+          if (clientName === 'STASH' && !switches.switchXHTTP) finalUrl += '&client=stash';
+          if (clientName !== 'STASH') finalUrl += '&udp=' + udpEnabled + '&xudp=' + xudpEnabled + '&tfo=' + tfoEnabled + '&scv=' + scvEnabled;
         } else {
           const encodedUrl = encodeURIComponent(subscriptionUrl);
           finalUrl = SUB_CONVERTER_URL
@@ -2028,6 +2113,18 @@ function generateHomePage(scuValue) {
             + '&new_name=' + (newNameEnabled ? 'true' : 'false');
         }
 
+        if (finalClashConfigUrl && (switches.switchECH || switches.switchXHTTP) && clientName !== 'STASH') {
+          const converterLink = new URL(finalUrl);
+          if (switches.switchXHTTP) {
+            // The converter receives known WS nodes; only its returned generated VLESS nodes are upgraded.
+            const wsSource = new URL(converterLink.searchParams.get('url'));
+            wsSource.searchParams.delete('transport');
+            wsSource.searchParams.delete('xhttpReady');
+            converterLink.searchParams.set('url', wsSource.toString());
+          }
+          finalUrl = subscriptionUrl + '&target=' + (switches.switchXHTTP ? 'clash-compat' : 'clash-ech')
+            + '&converterQuery=' + encodeURIComponent(converterLink.search.slice(1));
+        }
         urlElement.textContent = finalUrl;
         urlElement.style.display = 'block';
 
@@ -2139,6 +2236,189 @@ function generateHomePage(scuValue) {
 </html>`;
 }
 
+
+
+
+// Apply default or custom ECH DoH; retain other template DNS and scope policies to the ECH query name.
+// Mihomo resolves ECH through ProxyServerHostResolver, so configure both policy maps.
+function applyClashECHDNS(text, ech) {
+  const lines = text.split(/\r?\n/);
+  const top = lines.map((line, index) => /^dns\s*:/.test(line) ? index : -1).filter(index => index >= 0);
+  if (top.length > 1) throw new Error('重复的 dns 配置');
+  if (!top.length) {
+    return text + '\ndns:\n  enable: true\n  default-nameserver: [223.5.5.5, 1.1.1.1]\n  nameserver: [system]\n'
+      + '  nameserver-policy:\n    ' + JSON.stringify(ech.domain) + ': [' + JSON.stringify(ech.dns) + ']\n'
+      + '  proxy-server-nameserver-policy:\n    '
+      + JSON.stringify(ech.domain) + ': [' + JSON.stringify(ech.dns) + ']\n';
+  }
+  const begin = top[0];
+  if (!/^dns:\s*(?:#.*)?$/.test(lines[begin])) throw new Error('自定义 ECH DNS 需要块格式 dns');
+  function dnsEnd() {
+    let end = begin + 1;
+    while (end < lines.length && !/^[^\s#]/.test(lines[end])) end++;
+    return end;
+  }
+  function child(key) {
+    const found = [];
+    for (let i = begin + 1; i < dnsEnd(); i++) if (lines[i].startsWith('  ' + key + ':')) found.push(i);
+    if (found.length > 1) throw new Error('重复的 DNS 字段: ' + key);
+    return found.length ? found[0] : -1;
+  }
+  const enabled = child('enable');
+  if (enabled < 0) lines.splice(begin + 1, 0, '  enable: true');
+  else if (!/^  enable:\s*true\s*(?:#.*)?$/.test(lines[enabled])) throw new Error('模板 DNS 未开启，请在模板中启用后使用自定义 ECH DNS');
+  // A conservative editor: unknown indentation, merges or aliases fail explicitly.
+  for (let i = begin + 1; i < dnsEnd(); i++) {
+    if (/^\s*(?:#.*)?$/.test(lines[i])) continue;
+    if (/^\s*<<:/.test(lines[i]) || /\t/.test(lines[i]) || /^ [^ ]/.test(lines[i])) throw new Error('DNS 缩进或合并结构不受支持');
+  }
+  function insertDefault(key, value) {
+    if (child(key) < 0) lines.splice(begin + 1, 0, '  ' + key + ': ' + value);
+  }
+  insertDefault('default-nameserver', '[223.5.5.5, 1.1.1.1]');
+  insertDefault('nameserver', '[system]');
+  for (const key of ['nameserver-policy', 'proxy-server-nameserver-policy']) {
+    let i = child(key);
+    if (i < 0) { lines.splice(begin + 1, 0, '  ' + key + ':'); i = begin + 1; }
+    if (!new RegExp('^  ' + key + ':\\s*(?:#.*)?$').test(lines[i])) throw new Error('自定义 ECH DNS 需要块格式 ' + key);
+    let end = i + 1;
+    while (end < dnsEnd() && !/^  [^\s#-]/.test(lines[end])) end++;
+    for (let j = i + 1; j < end; j++) {
+      if (/^\s*(?:#.*)?$/.test(lines[j])) continue;
+      if (/^    [^\s#-]/.test(lines[j])) {
+        const m = lines[j].match(/^    ("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^:]+):/);
+        if (!m) throw new Error('DNS 策略键格式不受支持');
+        let domain = m[1].trim();
+        if (domain.startsWith('"')) domain = JSON.parse(domain);
+        else if (domain.startsWith("'")) domain = domain.slice(1, -1).replace(/''/g, "'");
+        if (domain.toLowerCase() === ech.domain.toLowerCase()) {
+          let next = j + 1;
+          while (next < end && !/^    [^\s#-]/.test(lines[next])) next++;
+          lines.splice(j, next - j); end -= next - j; j--;
+        }
+      }
+    }
+    lines.splice(i + 1, 0, '    ' + JSON.stringify(ech.domain) + ': [' + JSON.stringify(ech.dns) + ']');
+  }
+  return lines.join('\n');
+}
+
+// Patch only generated TLS proxy entries, retaining template groups, rules and DNS.
+// Unsupported YAML is rejected explicitly rather than returning an unverified ECH subscription.
+
+// A bounded editor for the common block/flow proxy lists emitted by subconverter.
+// Other YAML structures are rejected instead of returning a WS subscription as XHTTP.
+function splitClashFlowMap(raw) {
+  raw = raw.trim();
+  if (!raw.startsWith('{') || !raw.endsWith('}')) throw new Error('不支持的 flow 节点');
+  const parts = []; let quote = '', depth = 0, start = 1;
+  for (let i = 1; i < raw.length - 1; i++) {
+    const ch = raw[i];
+    if (quote) {
+      if (quote === '"' && ch === '\\') { i++; continue; }
+      if (ch === quote) { if (quote === "'" && raw[i + 1] === "'") i++; else quote = ''; }
+      continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch; continue; }
+    if (ch === '#') throw new Error('不支持 flow 节点内注释');
+    if (ch === '{' || ch === '[') depth++;
+    if (ch === '}' || ch === ']') depth--;
+    if (depth < 0) throw new Error('flow 节点括号无效');
+    if (ch === ',' && depth === 0) { parts.push(raw.slice(start, i)); start = i + 1; }
+  }
+  if (quote || depth) throw new Error('flow 节点未闭合');
+  parts.push(raw.slice(start, -1));
+  const keys = new Set();
+  return parts.filter(part => part.trim()).map(part => {
+    const m = part.trim().match(/^([a-zA-Z0-9_-]+)\s*:\s*([\s\S]*)$/);
+    if (!m || keys.has(m[1])) throw new Error('不支持的或重复的 flow 字段');
+    keys.add(m[1]); return { key: m[1], value: m[2] };
+  });
+}
+function clashScalar(value) {
+  value = value.trim();
+  if (value.startsWith('"')) return JSON.parse(value);
+  if (value.startsWith("'") && value.endsWith("'")) return value.slice(1, -1).replace(/''/g, "'");
+  if (/[\n\r]/.test(value) || /^[&*!>|{[]/.test(value)) throw new Error('不支持的节点标量');
+  return value.replace(/\s+#.*$/, '').trim();
+}
+function rewriteClashProxyList(text, transform) {
+  const lines = text.split(/\r?\n/);
+  const begin = lines.findIndex(line => /^proxies:\s*(?:#.*)?$/.test(line));
+  if (begin < 0) throw new Error('远程 YAML 必须包含块格式 proxies 列表');
+  let end = begin + 1;
+  while (end < lines.length && !/^[a-zA-Z_][^:]*:/.test(lines[end])) end++;
+  const starts = [];
+  for (let i = begin + 1; i < end; i++) {
+    const m = lines[i].match(/^( *)-\s+/);
+    if (m && (!starts.length || m[1].length === starts[0].indent)) starts.push({ index: i, indent: m[1].length });
+  }
+  if (!starts.length) throw new Error('远程结果没有代理节点');
+  const output = []; let changed = 0;
+  output.push(...lines.slice(0, starts[0].index));
+  for (let n = 0; n < starts.length; n++) {
+    const { index, indent } = starts[n];
+    const next = n + 1 < starts.length ? starts[n + 1].index : end;
+    const original = lines.slice(index, next);
+    const content = original[0].replace(/^ *-\s+/, '');
+    const flow = content.startsWith('{');
+    let fields;
+    if (flow) {
+      fields = splitClashFlowMap([content, ...original.slice(1)].join('\n').trim());
+    } else {
+      fields = []; const seen = new Set();
+      const body = [' '.repeat(indent + 2) + content, ...original.slice(1)];
+      const prefix = ' '.repeat(indent + 2);
+      for (const line of body) {
+        if (line.startsWith(prefix) && line[prefix.length] !== ' ') {
+          const m = line.slice(prefix.length).match(/^([a-zA-Z0-9_-]+):(?:\s+(.*)|\s*)$/);
+          if (m) {
+            if (seen.has(m[1])) throw new Error('重复节点字段: ' + m[1]);
+            seen.add(m[1]); fields.push({ key: m[1], value: m[2] || '', raw: [line] }); continue;
+          }
+        }
+        if (!fields.length) throw new Error('不支持的块格式节点');
+        fields[fields.length - 1].raw.push(line);
+      }
+    }
+    const get = key => { const field = fields.find(field => field.key === key); return field ? clashScalar(field.value) : ''; };
+    const updates = transform(get, fields);
+    if (!updates) { output.push(...original); continue; }
+    changed++;
+    const removed = new Set(Object.keys(updates));
+    fields = fields.filter(field => !removed.has(field.key));
+    for (const [key, value] of Object.entries(updates)) if (value !== null) fields.push({ key, value });
+    if (flow) {
+      output.push(' '.repeat(indent) + '- {' + fields.map(field => field.key + ': ' + field.value).join(', ') + '}');
+    } else {
+      const rewritten = [];
+      for (const field of fields) rewritten.push(...(field.raw || [' '.repeat(indent + 2) + field.key + ': ' + field.value]));
+      if (!rewritten.length) throw new Error('节点为空');
+      rewritten[0] = ' '.repeat(indent) + '- ' + rewritten[0].slice(indent + 2);
+      output.push(...rewritten);
+    }
+  }
+  if (!changed) throw new Error('未找到可进行兼容处理的节点');
+  output.push(...lines.slice(end)); return output.join('\n');
+}
+function restoreRemoteClashXHTTP(text, options) {
+  if (!options.host) throw new Error('缺少 XHTTP Host');
+  return rewriteClashProxyList(text, get => {
+    if (get('type') !== 'vless' || get('uuid').toLowerCase() !== options.uuid.toLowerCase()) return null;
+    if (get('network') !== 'ws') throw new Error('转换后的生成节点不是 WS，无法安全补回 XHTTP');
+    return { network: 'xhttp', 'ws-opts': null, 'ws-headers': null,
+      'xhttp-opts': '{path: ' + JSON.stringify(normalizeMihomoXHTTPPath(options.path)) + ', host: ' + JSON.stringify(options.host) + ', mode: packet-up}' };
+  });
+}
+
+function restoreRemoteClashECH(text, ech) {
+  return rewriteClashProxyList(text, (get, fields) => {
+    if (!['vless', 'trojan', 'vmess'].includes(get('type')) || get('tls') !== 'true') return null;
+    if (fields.some(field => field.key === 'ech-opts')) throw new Error('远程节点已含 ECH，拒绝覆盖未知结构');
+    return { 'ech-opts': '{enable: true, query-server-name: ' + JSON.stringify(ech.domain) + '}' };
+  });
+}
+
 // 主处理函数
 export default {
   async fetch(request, env) {
@@ -2204,6 +2484,32 @@ export default {
       }
     }
 
+    // Exact original converter query; only this explicit ECH endpoint postprocesses output.
+    if (['clash-ech', 'clash-compat'].includes(url.searchParams.get('target')) && /^\/[^/]+\/sub$/.test(path)) {
+      try {
+        const ech = getECHOptions(url.searchParams);
+        const xhttp = url.searchParams.get('transport') === 'xhttp' && url.searchParams.get('xhttpReady') === 'yes' && url.searchParams.get('client') === 'mihomo';
+        if (!ech && !xhttp) throw new Error('缺少 ECH 或已确认的 Mihomo XHTTP 设置');
+        const query = new URLSearchParams(url.searchParams.get('converterQuery') || '');
+        const source = new URL(query.get('url'));
+        if (query.get('target') !== 'clash' || source.origin !== url.origin || source.pathname !== path
+          || (ech && source.searchParams.get('ech') !== 'yes') || source.searchParams.has('target')) throw new Error('转换器来源无效');
+        const converter = new URL(scu);
+        converter.search = query.toString();
+        const result = await fetch(converter, { signal: AbortSignal.timeout(15000) });
+        if (!result.ok) throw new Error('转换器 HTTP ' + result.status);
+        let text = await result.text();
+        if (xhttp) {
+          if (source.searchParams.get('domain') !== url.searchParams.get('domain') || (source.searchParams.get('path') || '/') !== (url.searchParams.get('path') || '/')) throw new Error('XHTTP 来源参数不一致');
+          text = restoreRemoteClashXHTTP(text, { uuid: decodeURIComponent(path.split('/')[1]), host: url.searchParams.get('domain'), path: url.searchParams.get('path') || '/' });
+        }
+        if (ech) {
+          text = restoreRemoteClashECH(text, ech);
+          text = applyClashECHDNS(text, ech);
+        }
+        return new Response(text, { headers: { 'Content-Type': 'text/yaml; charset=utf-8' } });
+      } catch (error) { return new Response('Clash 兼容处理失败: ' + error.message, { status: 422 }); }
+    }
     const pathMatch = path.match(/^\/([^\/]+)\/sub$/);
     if (pathMatch) {
       const uuid = pathMatch[1];
@@ -2260,5 +2566,6 @@ export default {
     return new Response('Not Found', { status: 404 });
   }
 };
+
 
 
