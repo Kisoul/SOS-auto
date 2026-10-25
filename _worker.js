@@ -16,8 +16,8 @@ let scu = 'https://url.v1.mk/sub';
 
 // 默认优选域名列表
 const directDomains = [
-  { domain: 'top1.kisoul.org' },
-  { domain: 'top2.kisoul.org' },
+  { domain: 'tel1.kisoul.org' },
+  { domain: 'tel2.kisoul.org' },
   { domain: 'hkt1.kisoul.org' },
   { domain: 'hkt2.kisoul.org' },
   { domain: 'hku1.kisoul.org' }, 
