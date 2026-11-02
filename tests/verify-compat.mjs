@@ -33,6 +33,9 @@ for (const flow of [true,false]) for (const ech of [false,true]) for (const xhtt
   outer.searchParams.set('converterQuery',query.toString());
   const response=await worker.fetch(new Request(outer),{}); const result=await response.text();
   assert.equal(response.status,200,result); assert.ok(result.includes(tail));
+  const compact = new URL(outer);
+  compact.searchParams.delete('converterQuery'); compact.searchParams.set('template','acl_Kisoul');
+  assert.equal(await (await worker.fetch(new Request(compact),{})).text(),result);
   assert.equal((result.match(/query-server-name/g)||[]).length,ech?3:0);
   assert.equal((result.match(/network: xhttp/g)||[]).length,xhttp?1:0);
   if(xhttp) { assert.ok(result.includes('mode: auto')); assert.ok(result.includes('x-padding-bytes: "100-1000"')); assert.ok(result.includes('/244341896@qq.com')); }

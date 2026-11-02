@@ -18,7 +18,7 @@ for(const match of html.matchAll(/id="([^"]+)"/g)) element(match[1]);
 element('domain').value='proxy.example';element('uuid').value='00000000-0000-4000-8000-000000000001';
 element('ipSource').value='uouin';element('clashConfigMode').value='default';
 let loaded;let alerts=0;
-const context=vm.createContext({URL,encodeURIComponent,Set,document:{
+const context=vm.createContext({URL,URLSearchParams,encodeURIComponent,Set,document:{
  getElementById:element,createElement:()=>({}),
  querySelectorAll:selector=>selector==='.switch'?[...elements.values()].filter(x=>x.id.startsWith('switch')):[],
  addEventListener:(name,callback)=>loaded=callback},window:{location:{href:'https://worker.example/'}},
@@ -79,6 +79,8 @@ for(const mode of ['auto','stream-one','stream-up','packet-up']) {
 element('clashConfigMode').value='custom'; element('clashConfigUrl').value='https://example.com/Kisoul.ini';
 run("generateClientLink('clash','CLASH')");
 assert.equal(new URL(element('clientSubscriptionUrl').textContent).searchParams.get('xhttpMode'),'packet-up');
+assert.equal(new URL(element('clientSubscriptionUrl').textContent).searchParams.get('template'),'https://example.com/Kisoul.ini');
+assert.equal(new URL(element('clientSubscriptionUrl').textContent).searchParams.has('converterQuery'),false);
 element('xhttpPaddingBytes').value='300-200'; const previousAlerts=alerts;
 run("generateClientLink('clash','CLASH')"); assert.equal(alerts,previousAlerts+1);
 element('clashConfigMode').value='default';

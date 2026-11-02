@@ -2162,15 +2162,16 @@ function generateHomePage(scuValue) {
 
         if (finalClashConfigUrl && (switches.switchECH || switches.switchXHTTP) && clientName !== 'STASH') {
           const converterLink = new URL(finalUrl);
-          if (switches.switchXHTTP) {
-            // The converter receives known WS nodes; only its returned generated VLESS nodes are upgraded.
-            const wsSource = new URL(converterLink.searchParams.get('url'));
-            wsSource.searchParams.delete('transport');
-            wsSource.searchParams.delete('xhttpReady');
-            converterLink.searchParams.set('url', wsSource.toString());
-          }
+          const defaults = {insert:'false',emoji:'true',list:'false',xudp:'true',udp:'true',tfo:'true',expand:'true',scv:'false',fdn:'true',new_name:'true'};
+          const overrides = new URLSearchParams();
+          Object.keys(defaults).forEach(function (key) {
+            const value = converterLink.searchParams.get(key);
+            if (value !== null && value !== defaults[key]) overrides.set(key,value);
+          });
+          const preset = Object.keys(PRESET_CONFIG_MAP).find(function (key) { return PRESET_CONFIG_MAP[key] === finalClashConfigUrl; });
           finalUrl = subscriptionUrl + '&target=' + (switches.switchXHTTP ? 'clash-compat' : 'clash-ech')
-            + '&converterQuery=' + encodeURIComponent(converterLink.search.slice(1));
+            + '&template=' + encodeURIComponent(preset || finalClashConfigUrl)
+            + (overrides.size ? '&cv=' + encodeURIComponent(overrides.toString()) : '');
         }
         urlElement.textContent = finalUrl;
         urlElement.style.display = 'block';
@@ -2545,6 +2546,21 @@ export default {
         const xhttp = url.searchParams.get('transport') === 'xhttp' && url.searchParams.get('xhttpReady') === 'yes' && url.searchParams.get('client') === 'mihomo';
         if (!ech && !xhttp) throw new Error('缺少 ECH 或已确认的 Mihomo XHTTP 设置');
         const query = new URLSearchParams(url.searchParams.get('converterQuery') || '');
+        if (!url.searchParams.has('converterQuery')) {
+          const template = url.searchParams.get('template');
+          const config = presetClashConfigMap[template] || template;
+          const configURL = new URL(config);
+          if (!['https:', 'http:'].includes(configURL.protocol)) throw new Error('无效的模板 URL');
+          const sourceURL = new URL(url);
+          ['target','template','cv','converterQuery'].forEach(key => sourceURL.searchParams.delete(key));
+          query.set('target','clash'); query.set('url',sourceURL.toString()); query.set('config',configURL.toString());
+          const defaults = {insert:'false',emoji:'true',list:'false',xudp:'true',udp:'true',tfo:'true',expand:'true',scv:'false',fdn:'true',new_name:'true'};
+          for (const [key,value] of new URLSearchParams(url.searchParams.get('cv') || '')) {
+            if (!Object.hasOwn(defaults,key) || !['true','false'].includes(value)) throw new Error('无效的转换选项');
+            defaults[key] = value;
+          }
+          for (const [key,value] of Object.entries(defaults)) query.set(key,value);
+        }
         const source = new URL(query.get('url'));
         if (query.get('target') !== 'clash' || source.origin !== url.origin || source.pathname !== path
           || source.searchParams.has('target')) throw new Error('转换器来源无效');
