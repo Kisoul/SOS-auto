@@ -644,6 +644,15 @@ function normalizeMihomoXHTTPPath(value) {
   throw new Error('Mihomo XHTTP 不支持此路径查询参数，请填写纯路径，例如 / 或 /xhttp');
 }
 
+function getMihomoXHTTPOptions(params) {
+  const mode = params.get('xhttpMode') || 'auto';
+  const padding = params.get('xhttpPaddingBytes') || '100-1000';
+  if (!['auto', 'stream-one', 'stream-up', 'packet-up'].includes(mode)) throw new Error('无效的 Mihomo XHTTP mode');
+  const range = padding.split('-');
+  if (range.length !== 2 || range.some(n => !/^\d+$/.test(n) || !Number.isSafeInteger(Number(n))) || Number(range[0]) > Number(range[1]) || Number(range[1]) > 1000000) throw new Error('无效的 XHTTP padding 范围');
+  return { mode, padding };
+}
+
 // YAML 字符串转义
 function escapeYamlString(str) {
   const s = String(str == null ? '' : str);
@@ -701,7 +710,11 @@ function generateClashConfig(links, params = new URLSearchParams()) {
       yaml += '    xhttp-opts:\n';
       yaml += '      path: ' + escapeYamlString(normalizeMihomoXHTTPPath(path)) + '\n';
       yaml += '      host: ' + escapeYamlString(host) + '\n';
-      yaml += '      mode: packet-up\n';
+      if (nativeOptions) {
+        const options = getMihomoXHTTPOptions(params);
+        yaml += '      mode: ' + options.mode + '\n';
+        yaml += '      x-padding-bytes: ' + JSON.stringify(options.padding) + '\n';
+      } else yaml += '      mode: packet-up\n';
     } else {
       yaml += '    network: ws\n';
       yaml += '    ws-opts:\n';
@@ -1647,7 +1660,7 @@ function generateHomePage(scuValue) {
       </div>
 
       <div class="list-item" onclick="toggleSwitch('switchXHTTP')">
-        <div><div class="list-item-label">VLESS XHTTP（实验性）</div><div class="list-item-description">支持原始 V2RAY / V2RAYNG（Xray）、Shadowrocket（2.2.67+）及 CLASH（支持 XHTTP 的 Mihomo，含远程 INI 模板）、默认模板 STASH（iOS/tvOS 3.6+、macOS 4.3+）；旧版 Clash 不支持。请确认客户端内核及已部署的 XHTTP 服务端均支持。开启即确认两端支持。当前订阅生成器不实现 Workers XHTTP 转发；普通 WS Worker 不能直接使用。Clash 远程模板由 Worker 在转换后补回 XHTTP；Stash 远程模板、其他客户端及未确认路径回退 WS。Trojan / VMess 继续 WS，路径沿用上方自定义路径；Mihomo 输出会移除遗留的 WS ?ed=数字，其他查询参数请改为纯路径；模式 packet-up。</div><div class="context-note" id="xhttpCompatibilityNote"></div></div>
+        <div><div class="list-item-label">VLESS XHTTP（实验性）</div><div class="list-item-description">支持原始 V2RAY / V2RAYNG（Xray）、Shadowrocket（2.2.67+）及 CLASH（支持 XHTTP 的 Mihomo，含远程 INI 模板）、默认模板 STASH（iOS/tvOS 3.6+、macOS 4.3+）；旧版 Clash 不支持。请确认客户端内核及已部署的 XHTTP 服务端均支持。开启即确认两端支持。当前订阅生成器不实现 Workers XHTTP 转发；普通 WS Worker 不能直接使用。Clash 远程模板由 Worker 在转换后补回 XHTTP；Stash 远程模板、其他客户端及未确认路径回退 WS。Trojan / VMess 继续 WS，路径沿用上方自定义路径；Mihomo 输出会移除遗留的 WS ?ed=数字，其他查询参数请改为纯路径；Mihomo 模式 auto，padding 100-1000（订阅参数 xhttpMode / xhttpPaddingBytes 可调整）；其他客户端保持原模式。</div><div class="context-note" id="xhttpCompatibilityNote"></div></div>
         <div class="switch" id="switchXHTTP"></div>
       </div>
       <div class="list-item" onclick="toggleSwitch('switchECH')">
@@ -2413,19 +2426,24 @@ function rewriteClashProxyList(text, transform) {
   if (!changed) throw new Error('未找到可进行兼容处理的节点');
   output.push(...lines.slice(end)); return output.join('\n');
 }
+function isGeneratedClashProxy(get, options) {
+  const credential = get(get('type') === 'trojan' ? 'password' : 'uuid');
+  return credential.toLowerCase() === options.uuid.toLowerCase()
+    && get('servername').toLowerCase() === options.host.toLowerCase();
+}
 function restoreRemoteClashXHTTP(text, options) {
   if (!options.host) throw new Error('缺少 XHTTP Host');
   return rewriteClashProxyList(text, get => {
-    if (get('type') !== 'vless' || get('uuid').toLowerCase() !== options.uuid.toLowerCase()) return null;
+    if (get('type') !== 'vless' || !isGeneratedClashProxy(get, options)) return null;
     if (get('network') !== 'ws') throw new Error('转换后的生成节点不是 WS，无法安全补回 XHTTP');
     return { network: 'xhttp', 'ws-opts': null, 'ws-headers': null,
-      'xhttp-opts': '{path: ' + JSON.stringify(normalizeMihomoXHTTPPath(options.path)) + ', host: ' + JSON.stringify(options.host) + ', mode: packet-up}' };
+      'xhttp-opts': '{path: ' + JSON.stringify(normalizeMihomoXHTTPPath(options.path)) + ', host: ' + JSON.stringify(options.host) + ', mode: ' + options.mode + ', x-padding-bytes: ' + JSON.stringify(options.padding) + '}' };
   });
 }
 
-function restoreRemoteClashECH(text, ech) {
+function restoreRemoteClashECH(text, ech, options) {
   return rewriteClashProxyList(text, (get, fields) => {
-    if (!['vless', 'trojan', 'vmess'].includes(get('type')) || get('tls') !== 'true') return null;
+    if (!['vless', 'trojan', 'vmess'].includes(get('type')) || get('tls') !== 'true' || !isGeneratedClashProxy(get, options)) return null;
     if (fields.some(field => field.key === 'ech-opts')) throw new Error('远程节点已含 ECH，拒绝覆盖未知结构');
     return { 'ech-opts': '{enable: true, query-server-name: ' + JSON.stringify(ech.domain) + '}' };
   });
@@ -2505,18 +2523,36 @@ export default {
         const query = new URLSearchParams(url.searchParams.get('converterQuery') || '');
         const source = new URL(query.get('url'));
         if (query.get('target') !== 'clash' || source.origin !== url.origin || source.pathname !== path
-          || (ech && source.searchParams.get('ech') !== 'yes') || source.searchParams.has('target')) throw new Error('转换器来源无效');
+          || source.searchParams.has('target')) throw new Error('转换器来源无效');
+        // Sanitize at the request boundary, including saved converterQuery URLs.
+        // The outer URL retains the user's ECH settings for restoration.
+        if (source.searchParams.get('domain') !== url.searchParams.get('domain') || (source.searchParams.get('path') || '/') !== (url.searchParams.get('path') || '/')) throw new Error('兼容来源参数不一致');
+        const options = { uuid: decodeURIComponent(path.split('/')[1]), host: url.searchParams.get('domain'), path: url.searchParams.get('path') || '/' };
+        if (!options.host || !isValidUUID(options.uuid)) throw new Error('无效的兼容节点身份');
+        if (xhttp) {
+          Object.assign(options, getMihomoXHTTPOptions(url.searchParams));
+          normalizeMihomoXHTTPPath(options.path);
+          source.searchParams.delete('transport');
+          source.searchParams.delete('xhttpReady');
+        }
+        if (ech) {
+          source.searchParams.delete('ech');
+          source.searchParams.delete('customECHDomain');
+          source.searchParams.delete('customDNS');
+          // Removing ECH must retain the TLS-only node selection it implied.
+          source.searchParams.set('dkby', 'yes');
+        }
+        query.set('url', source.toString());
         const converter = new URL(scu);
         converter.search = query.toString();
         const result = await fetch(converter, { signal: AbortSignal.timeout(15000) });
         if (!result.ok) throw new Error('转换器 HTTP ' + result.status);
         let text = await result.text();
         if (xhttp) {
-          if (source.searchParams.get('domain') !== url.searchParams.get('domain') || (source.searchParams.get('path') || '/') !== (url.searchParams.get('path') || '/')) throw new Error('XHTTP 来源参数不一致');
-          text = restoreRemoteClashXHTTP(text, { uuid: decodeURIComponent(path.split('/')[1]), host: url.searchParams.get('domain'), path: url.searchParams.get('path') || '/' });
+          text = restoreRemoteClashXHTTP(text, options);
         }
         if (ech) {
-          text = restoreRemoteClashECH(text, ech);
+          text = restoreRemoteClashECH(text, ech, options);
           text = applyClashECHDNS(text, ech);
         }
         return new Response(text, { headers: { 'Content-Type': 'text/yaml; charset=utf-8' } });
