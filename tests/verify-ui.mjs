@@ -66,4 +66,23 @@ const config=await (await worker.fetch(new Request(base+'&ports=443&target=sing-
 const node=config.outbounds.find(x=>x.type==='vless');assert.equal(node.network,'tcp');assert.equal(node.packet_encoding,'');
 const trojan=atob(await (await worker.fetch(new Request(base+'&ev=no&et=yes&ports=443'),{})).text());
 assert.ok(!trojan.includes('vless://'));
-console.log('PASS: UI ECH/TLS, UDP/XUDP, protocol selection, source/client scope, backend empty-node rejection');
+element('clashConfigMode').value='default';
+run("switches.switchVL=true;switches.switchXHTTP=true;generateClientLink('clash','CLASH')");
+assert.equal(element('xhttpOptionsPanel').hidden,false);
+for(const mode of ['auto','stream-one','stream-up','packet-up']) {
+  element('xhttpMode').value=mode; element('xhttpPaddingBytes').value='200-300';
+  run("generateClientLink('clash','CLASH')");
+  const result=new URL(element('clientSubscriptionUrl').textContent);
+  assert.equal(result.searchParams.get('xhttpMode'),mode);
+  assert.equal(result.searchParams.get('xhttpPaddingBytes'),'200-300');
+}
+element('clashConfigMode').value='custom'; element('clashConfigUrl').value='https://example.com/Kisoul.ini';
+run("generateClientLink('clash','CLASH')");
+assert.equal(new URL(element('clientSubscriptionUrl').textContent).searchParams.get('xhttpMode'),'packet-up');
+element('xhttpPaddingBytes').value='300-200'; const previousAlerts=alerts;
+run("generateClientLink('clash','CLASH')"); assert.equal(alerts,previousAlerts+1);
+element('clashConfigMode').value='default';
+run("generateClientLink('clash','STASH')");
+assert.equal(element('xhttpOptionsPanel').hidden,true);
+assert.equal(new URL(element('clientSubscriptionUrl').textContent).searchParams.has('xhttpMode'),false);
+console.log('PASS: UI ECH/TLS, UDP/XUDP, protocol selection, source/client scope, backend empty-node rejection, XHTTP controls and four modes, INI link, invalid padding, Stash scope');

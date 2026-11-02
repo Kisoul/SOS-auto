@@ -1663,6 +1663,18 @@ function generateHomePage(scuValue) {
         <div><div class="list-item-label">VLESS XHTTP（实验性）</div><div class="list-item-description">支持原始 V2RAY / V2RAYNG（Xray）、Shadowrocket（2.2.67+）及 CLASH（支持 XHTTP 的 Mihomo，含远程 INI 模板）、默认模板 STASH（iOS/tvOS 3.6+、macOS 4.3+）；旧版 Clash 不支持。请确认客户端内核及已部署的 XHTTP 服务端均支持。开启即确认两端支持。当前订阅生成器不实现 Workers XHTTP 转发；普通 WS Worker 不能直接使用。Clash 远程模板由 Worker 在转换后补回 XHTTP；Stash 远程模板、其他客户端及未确认路径回退 WS。Trojan / VMess 继续 WS，路径沿用上方自定义路径；Mihomo 输出会移除遗留的 WS ?ed=数字，其他查询参数请改为纯路径；Mihomo 模式 auto，padding 100-1000（订阅参数 xhttpMode / xhttpPaddingBytes 可调整）；其他客户端保持原模式。</div><div class="context-note" id="xhttpCompatibilityNote"></div></div>
         <div class="switch" id="switchXHTTP"></div>
       </div>
+      <div class="form-group linked-panel" id="xhttpOptionsPanel" hidden>
+        <label for="xhttpMode">Mihomo XHTTP 模式</label>
+        <select id="xhttpMode">
+          <option value="auto" selected>auto（自动，默认）</option>
+          <option value="stream-one">stream-one</option>
+          <option value="stream-up">stream-up</option>
+          <option value="packet-up">packet-up</option>
+        </select>
+        <label for="xhttpPaddingBytes">Padding 字节范围</label>
+        <input type="text" id="xhttpPaddingBytes" value="100-1000" placeholder="100-1000">
+        <small>仅 Clash/Mihomo 生效，默认模板与远程 INI 均支持。模式需要服务端支持；路径沿用上方自定义路径。</small>
+      </div>
       <div class="list-item" onclick="toggleSwitch('switchECH')">
         <div><div class="list-item-label">ECH（加密 ClientHello）</div><div class="list-item-description">默认关闭；开启后仅生成 TLS 节点，需要客户端和服务端支持</div></div>
         <div class="switch" id="switchECH"></div>
@@ -1818,7 +1830,7 @@ function generateHomePage(scuValue) {
       const sections = [
         ['连接信息','填写代理域名与身份信息，端口和路径可按需调整。',connection],
         ['节点来源','可组合多个来源；原生地址始终保留。',[sources[0],sources[1],dynamic,sources[2],field('githubUrl')]],
-        ['协议与连接','选择至少一种协议，再配置加密与传输选项。',[protocol,row('switchXHTTP'),row('switchECH'),ech,row('switchTLS'),row('switchUDP'),row('switchXUDP'),row('switchTFO'),row('switchSCV')]],
+        ['协议与连接','选择至少一种协议，再配置加密与传输选项。',[protocol,row('switchXHTTP'),document.getElementById('xhttpOptionsPanel'),row('switchECH'),ech,row('switchTLS'),row('switchUDP'),row('switchXUDP'),row('switchTFO'),row('switchSCV')]],
         ['分组与分流','从远程模板读取策略；默认模式使用基础分组。',[field('clashConfigMode'),field('clashConfigUrl')]],
         ['生成订阅','先选客户端，选项会同步显示对应的支持范围。',[client,converter]]
       ];
@@ -1840,6 +1852,9 @@ function generateHomePage(scuValue) {
       const xhttpAllowed = switches.switchVL && ((activeClient === 'v2ray' && ['V2RAY','V2RAYNG','Shadowrocket'].includes(activeClientName))
         || (activeClient === 'clash' && (activeClientName === 'CLASH' || (activeClientName === 'STASH' && document.getElementById('clashConfigMode').value === 'default'))));
       if (!xhttpAllowed) switches.switchXHTTP = false;
+      const mihomoXHTTP = switches.switchXHTTP && activeClient === 'clash' && activeClientName === 'CLASH';
+      document.getElementById('xhttpOptionsPanel').hidden = !mihomoXHTTP;
+      ['xhttpMode','xhttpPaddingBytes'].forEach(function (id) { document.getElementById(id).disabled = !mihomoXHTTP; });
       function availability(id, reason) {
         const element = document.getElementById(id);
         if (!element) return;
@@ -2063,6 +2078,15 @@ function generateHomePage(scuValue) {
       }
       if (switches.switchXHTTP) subscriptionUrl += '&transport=xhttp&xhttpReady=yes&client=' + (clientType === 'clash' ? (clientName === 'STASH' ? 'stash' : 'mihomo') : clientName === 'Shadowrocket' ? 'shadowrocket' : clientName === 'V2RAYNG' ? 'v2rayng' : 'v2ray');
       else if (clientType === 'clash') subscriptionUrl += '&transport=ws';
+      if (switches.switchXHTTP && clientType === 'clash' && clientName !== 'STASH') {
+        const xhttpMode = document.getElementById('xhttpMode').value || 'auto';
+        const padding = document.getElementById('xhttpPaddingBytes').value.trim() || '100-1000';
+        const range = padding.split('-');
+        if (!['auto','stream-one','stream-up','packet-up'].includes(xhttpMode) || range.length !== 2 || range.some(function (n) { return !/^[0-9]+$/.test(n) || !Number.isSafeInteger(Number(n)); }) || Number(range[0]) > Number(range[1]) || Number(range[1]) > 1000000) {
+          alert('请检查 XHTTP 模式与 Padding 范围，例如 100-1000'); return;
+        }
+        subscriptionUrl += '&xhttpMode=' + encodeURIComponent(xhttpMode) + '&xhttpPaddingBytes=' + encodeURIComponent(padding);
+      }
       if (customPath && customPath !== '/') subscriptionUrl += '&path=' + encodeURIComponent(customPath);
       if (customPortsRaw) subscriptionUrl += '&ports=' + encodeURIComponent(customPortsRaw);
 
