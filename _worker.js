@@ -676,12 +676,24 @@ function generateClashConfig(links, params = new URLSearchParams()) {
   yaml += 'log-level: info\n\n';
   yaml += 'proxies:\n';
 
+  const nodes = links.flatMap((link, index) => {
+    if (!link.startsWith('vless://')) return [];
+    const name = decodeURIComponent(link.split('#')[1] || ('节点' + (index + 1)));
+    return [{ link, name }];
+  });
+  const reservedNames = new Set(nodes.map(node => node.name));
+  const nextSuffix = new Map();
   const proxyNames = [];
 
-  links.forEach((link, index) => {
-    if (!link.startsWith('vless://')) return;
-
-    const name = decodeURIComponent((link.split('#')[1]) || ('节点' + (index + 1)));
+  nodes.forEach(({ link, name: baseName }) => {
+    let name = baseName;
+    let suffix = nextSuffix.get(baseName) || 1;
+    if (suffix > 1) {
+      do {
+        name = baseName + ' (' + suffix++ + ')';
+      } while (reservedNames.has(name));
+    }
+    nextSuffix.set(baseName, Math.max(2, suffix));
     proxyNames.push(name);
 
     const server = (link.match(/@([^:]+):(\d+)/) || [])[1] || '';
@@ -732,7 +744,7 @@ function generateClashConfig(links, params = new URLSearchParams()) {
   yaml += '\nproxy-groups:\n';
   yaml += '  - name: PROXY\n';
   yaml += '    type: select\n';
-  yaml += '    proxies: [' + proxyNames.map(n => "'" + n + "'").join(', ') + ']\n';
+  yaml += '    proxies: [' + proxyNames.map(name => "'" + name.replace(/'/g, "''") + "'").join(', ') + ']\n';
 
   yaml += '\nrules:\n';
   yaml += '  - DOMAIN-SUFFIX,local,DIRECT\n';
