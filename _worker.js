@@ -740,9 +740,7 @@ function generateClashConfig(links, params = new URLSearchParams()) {
   yaml += '  - GEOIP,CN,DIRECT\n';
   yaml += '  - MATCH,PROXY\n';
 
-  const ech = getECHOptions(params);
-  if (ech && params.get('client') !== 'stash') return applyClashECHDNS(yaml, ech);
-  return yaml;
+  return params.get('client') === 'stash' ? yaml : applyMihomoDNS(yaml, getECHOptions(params));
 }
 
 // 生成 Surge 配置
@@ -2160,7 +2158,7 @@ function generateHomePage(scuValue) {
             + '&new_name=' + (newNameEnabled ? 'true' : 'false');
         }
 
-        if (finalClashConfigUrl && (switches.switchECH || switches.switchXHTTP) && clientName !== 'STASH') {
+        if (finalClashConfigUrl && clientName !== 'STASH') {
           const converterLink = new URL(finalUrl);
           const defaults = {insert:'false',emoji:'true',list:'false',xudp:'true',udp:'true',tfo:'true',expand:'true',scv:'false',fdn:'true',new_name:'true'};
           const overrides = new URLSearchParams();
@@ -2169,7 +2167,7 @@ function generateHomePage(scuValue) {
             if (value !== null && value !== defaults[key]) overrides.set(key,value);
           });
           const preset = Object.keys(PRESET_CONFIG_MAP).find(function (key) { return PRESET_CONFIG_MAP[key] === finalClashConfigUrl; });
-          finalUrl = subscriptionUrl + '&target=' + (switches.switchXHTTP ? 'clash-compat' : 'clash-ech')
+          finalUrl = subscriptionUrl + '&target=' + (switches.switchXHTTP ? 'clash-compat' : switches.switchECH ? 'clash-ech' : 'clash-template')
             + '&template=' + encodeURIComponent(preset || finalClashConfigUrl)
             + (overrides.size ? '&cv=' + encodeURIComponent(overrides.toString()) : '');
         }
@@ -2289,20 +2287,18 @@ function generateHomePage(scuValue) {
 
 
 
-// Apply default or custom ECH DoH; retain other template DNS and scope policies to the ECH query name.
-// Mihomo resolves ECH through ProxyServerHostResolver, so configure both policy maps.
-function applyClashECHDNS(text, ech) {
+// Set Mihomo's main resolvers and scope any ECH resolver policy to the ECH query name.
+function applyMihomoDNS(text, ech) {
+  const nameservers = '["https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query"]';
   const lines = text.split(/\r?\n/);
   const top = lines.map((line, index) => /^dns\s*:/.test(line) ? index : -1).filter(index => index >= 0);
   if (top.length > 1) throw new Error('重复的 dns 配置');
   if (!top.length) {
-    return text + '\ndns:\n  enable: true\n  default-nameserver: [223.5.5.5, 1.1.1.1]\n  nameserver: [system]\n'
-      + '  nameserver-policy:\n    ' + JSON.stringify(ech.domain) + ': [' + JSON.stringify(ech.dns) + ']\n'
-      + '  proxy-server-nameserver-policy:\n    '
-      + JSON.stringify(ech.domain) + ': [' + JSON.stringify(ech.dns) + ']\n';
+    text += '\ndns:\n  enable: true\n  default-nameserver: [223.5.5.5, 1.1.1.1]\n  nameserver: ' + nameservers + '\n';
+    return ech ? applyMihomoDNS(text, ech) : text;
   }
   const begin = top[0];
-  if (!/^dns:\s*(?:#.*)?$/.test(lines[begin])) throw new Error('自定义 ECH DNS 需要块格式 dns');
+  if (!/^dns:\s*(?:#.*)?$/.test(lines[begin])) throw new Error('Mihomo DNS 需要块格式 dns');
   function dnsEnd() {
     let end = begin + 1;
     while (end < lines.length && !/^[^\s#]/.test(lines[end])) end++;
@@ -2314,9 +2310,6 @@ function applyClashECHDNS(text, ech) {
     if (found.length > 1) throw new Error('重复的 DNS 字段: ' + key);
     return found.length ? found[0] : -1;
   }
-  const enabled = child('enable');
-  if (enabled < 0) lines.splice(begin + 1, 0, '  enable: true');
-  else if (!/^  enable:\s*true\s*(?:#.*)?$/.test(lines[enabled])) throw new Error('模板 DNS 未开启，请在模板中启用后使用自定义 ECH DNS');
   // A conservative editor: unknown indentation, merges or aliases fail explicitly.
   for (let i = begin + 1; i < dnsEnd(); i++) {
     if (/^\s*(?:#.*)?$/.test(lines[i])) continue;
@@ -2325,8 +2318,20 @@ function applyClashECHDNS(text, ech) {
   function insertDefault(key, value) {
     if (child(key) < 0) lines.splice(begin + 1, 0, '  ' + key + ': ' + value);
   }
+  const main = child('nameserver');
+  if (main < 0) insertDefault('nameserver', nameservers);
+  else {
+    let end = main + 1;
+    while (end < dnsEnd() && !/^  [^\s#-]/.test(lines[end])) end++;
+    const comments = lines.slice(main + 1, end).filter(line => /^\s*(?:#.*)?$/.test(line));
+    lines.splice(main, end - main, '  nameserver: ' + nameservers, ...comments);
+  }
+
+  if (!ech) return lines.join('\n');
+  const enabled = child('enable');
+  if (enabled < 0) lines.splice(begin + 1, 0, '  enable: true');
+  else if (!/^  enable:\s*true\s*(?:#.*)?$/.test(lines[enabled])) throw new Error('模板 DNS 未开启，请在模板中启用后使用自定义 ECH DNS');
   insertDefault('default-nameserver', '[223.5.5.5, 1.1.1.1]');
-  insertDefault('nameserver', '[system]');
   for (const key of ['nameserver-policy', 'proxy-server-nameserver-policy']) {
     let i = child(key);
     if (i < 0) { lines.splice(begin + 1, 0, '  ' + key + ':'); i = begin + 1; }
@@ -2539,12 +2544,13 @@ export default {
       }
     }
 
-    // Exact original converter query; only this explicit ECH endpoint postprocesses output.
-    if (['clash-ech', 'clash-compat'].includes(url.searchParams.get('target')) && /^\/[^/]+\/sub$/.test(path)) {
+    // Apply the Mihomo DNS settings after the converter applies the remote template.
+    const target = url.searchParams.get('target');
+    if (['clash-template', 'clash-ech', 'clash-compat'].includes(target) && /^\/[^/]+\/sub$/.test(path)) {
       try {
         const ech = getECHOptions(url.searchParams);
         const xhttp = url.searchParams.get('transport') === 'xhttp' && url.searchParams.get('xhttpReady') === 'yes' && url.searchParams.get('client') === 'mihomo';
-        if (!ech && !xhttp) throw new Error('缺少 ECH 或已确认的 Mihomo XHTTP 设置');
+        if (target !== 'clash-template' && !ech && !xhttp) throw new Error('缺少 ECH 或已确认的 Mihomo XHTTP 设置');
         const query = new URLSearchParams(url.searchParams.get('converterQuery') || '');
         if (!url.searchParams.has('converterQuery')) {
           const template = url.searchParams.get('template');
@@ -2555,7 +2561,15 @@ export default {
           ['target','template','cv','converterQuery'].forEach(key => sourceURL.searchParams.delete(key));
           query.set('target','clash'); query.set('url',sourceURL.toString()); query.set('config',configURL.toString());
           const defaults = {insert:'false',emoji:'true',list:'false',xudp:'true',udp:'true',tfo:'true',expand:'true',scv:'false',fdn:'true',new_name:'true'};
-          for (const [key,value] of new URLSearchParams(url.searchParams.get('cv') || '')) {
+          const overrides = new URLSearchParams(url.searchParams.get('cv') || '');
+          if (target === 'clash-template') {
+            for (const key of Object.keys(defaults)) {
+              if (!overrides.has(key) && url.searchParams.has(key)) overrides.set(key, url.searchParams.get(key));
+              sourceURL.searchParams.delete(key);
+            }
+            query.set('url', sourceURL.toString());
+          }
+          for (const [key,value] of overrides) {
             if (!Object.hasOwn(defaults,key) || !['true','false'].includes(value)) throw new Error('无效的转换选项');
             defaults[key] = value;
           }
@@ -2591,10 +2605,8 @@ export default {
         if (xhttp) {
           text = restoreRemoteClashXHTTP(text, options);
         }
-        if (ech) {
-          text = restoreRemoteClashECH(text, ech, options);
-          text = applyClashECHDNS(text, ech);
-        }
+        if (ech) text = restoreRemoteClashECH(text, ech, options);
+        text = applyMihomoDNS(text, ech);
         return new Response(text, { headers: { 'Content-Type': 'text/yaml; charset=utf-8' } });
       } catch (error) { return new Response('Clash 兼容处理失败: ' + error.message, { status: 422 }); }
     }
