@@ -2306,7 +2306,7 @@ function applyMihomoDNS(text, ech) {
   const top = lines.map((line, index) => /^dns\s*:/.test(line) ? index : -1).filter(index => index >= 0);
   if (top.length > 1) throw new Error('重复的 dns 配置');
   if (!top.length) {
-    text += '\ndns:\n  enable: true\n  default-nameserver: [223.5.5.5, 1.1.1.1]\n  nameserver: ' + nameservers + '\n';
+    text += '\ndns:\n  enable: true\n  default-nameserver: [223.5.5.5, 119.29.29.29]\n  nameserver: ' + nameservers + '\n';
     return ech ? applyMihomoDNS(text, ech) : text;
   }
   const begin = top[0];
@@ -2343,7 +2343,7 @@ function applyMihomoDNS(text, ech) {
   const enabled = child('enable');
   if (enabled < 0) lines.splice(begin + 1, 0, '  enable: true');
   else if (!/^  enable:\s*true\s*(?:#.*)?$/.test(lines[enabled])) throw new Error('模板 DNS 未开启，请在模板中启用后使用自定义 ECH DNS');
-  insertDefault('default-nameserver', '[223.5.5.5, 1.1.1.1]');
+  insertDefault('default-nameserver', '[223.5.5.5, 119.29.29.29]');
   // Mihomo requires a non-empty resolver list when a proxy DNS policy is set.
   const proxyResolver = child('proxy-server-nameserver');
   if (proxyResolver < 0) insertDefault('proxy-server-nameserver', nameservers);
