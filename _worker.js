@@ -2344,6 +2344,20 @@ function applyMihomoDNS(text, ech) {
   if (enabled < 0) lines.splice(begin + 1, 0, '  enable: true');
   else if (!/^  enable:\s*true\s*(?:#.*)?$/.test(lines[enabled])) throw new Error('模板 DNS 未开启，请在模板中启用后使用自定义 ECH DNS');
   insertDefault('default-nameserver', '[223.5.5.5, 1.1.1.1]');
+  // Mihomo requires a non-empty resolver list when a proxy DNS policy is set.
+  const proxyResolver = child('proxy-server-nameserver');
+  if (proxyResolver < 0) insertDefault('proxy-server-nameserver', nameservers);
+  else {
+    const match = lines[proxyResolver].match(/^  proxy-server-nameserver:[ \t]*(\[[ \t]*\]|null|~)?[ \t]*(#.*)?$/i);
+    if (match) {
+      let firstValue = proxyResolver + 1;
+      while (firstValue < dnsEnd() && /^\s*(?:#.*)?$/.test(lines[firstValue])) firstValue++;
+      const hasBlockList = /^ {2,}-\s+/.test(lines[firstValue] || '');
+      if (match[1] || !hasBlockList) {
+        lines[proxyResolver] = '  proxy-server-nameserver: ' + nameservers + (match[2] ? ' ' + match[2] : '');
+      }
+    }
+  }
   for (const key of ['nameserver-policy', 'proxy-server-nameserver-policy']) {
     let i = child(key);
     if (i < 0) { lines.splice(begin + 1, 0, '  ' + key + ':'); i = begin + 1; }
